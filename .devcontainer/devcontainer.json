@@ -1,0 +1,33 @@
+{
+    "name": "nest-egg-api",
+    "dockerComposeFile": "../compose.yml",
+    "service": "backend",
+    "workspaceFolder": "/app/backend/app",
+    "remoteUser": "root",
+    "postCreateCommand": "pip install -r /app/backend/requirements.txt",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "charliermarsh.ruff"
+            ],
+            "settings": {
+                // Point to the Python inside the container
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                // Ruff as the linter and formatter
+                "editor.formatOnSave": true,
+                "editor.defaultFormatter": "charliermarsh.ruff",
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                },
+                // Pylance for IntelliSense
+                "python.languageServer": "Pylance",
+                // Makes imports resolve correctly inside the package
+                "python.analysis.extraPaths": [
+                    "/app/backend"
+                ]
+            }
+        }
+    }
+}
