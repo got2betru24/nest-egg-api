@@ -24,19 +24,22 @@ from dataclasses import dataclass, field
 # Data containers (passed in from DB)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BracketRow:
     """One row from the tax_brackets table."""
+
     rate: float
     income_min: float
-    income_max: float | None    # None = top bracket (no cap)
+    income_max: float | None  # None = top bracket (no cap)
 
 
 @dataclass
 class TaxYear:
     """All tax parameters for a given year, passed in from DB."""
+
     year: int
-    brackets: list[BracketRow]          # Must be sorted ascending by income_min
+    brackets: list[BracketRow]  # Must be sorted ascending by income_min
     standard_deduction: float
     filing_status: str = "married_filing_jointly"
 
@@ -45,14 +48,16 @@ class TaxYear:
 # LTCG / NIIT thresholds (MFJ 2025 — inflated in caller if needed)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class LTCGThresholds:
     """
     Long-term capital gains rate thresholds (MFJ).
     Caller should inflate these if projecting into future years.
     """
-    zero_max: float = 96_700.00       # 0% LTCG up to this taxable income
-    fifteen_max: float = 600_050.00   # 15% LTCG up to this taxable income
+
+    zero_max: float = 96_700.00  # 0% LTCG up to this taxable income
+    fifteen_max: float = 600_050.00  # 15% LTCG up to this taxable income
     niit_threshold: float = 250_000.00  # 3.8% NIIT on investment income above this AGI
 
 
@@ -60,9 +65,11 @@ class LTCGThresholds:
 # Result containers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class OrdinaryTaxResult:
     """Result of compute_ordinary_tax()."""
+
     gross_income: float
     standard_deduction: float
     taxable_income: float
@@ -75,8 +82,9 @@ class OrdinaryTaxResult:
 @dataclass
 class LTCGTaxResult:
     """Result of compute_ltcg_tax()."""
+
     gains_amount: float
-    ordinary_taxable_income: float   # AGI before gains
+    ordinary_taxable_income: float  # AGI before gains
     rate_applied: float
     ltcg_tax: float
     niit: float
@@ -86,25 +94,28 @@ class LTCGTaxResult:
 @dataclass
 class TotalTaxResult:
     """Combined ordinary + LTCG tax for a retirement year."""
+
     ordinary: OrdinaryTaxResult
     ltcg: LTCGTaxResult
     total_tax: float
-    total_effective_rate: float      # total_tax / gross_income (incl. gains)
-    ss_taxable_amount: float         # How much of SS benefits are taxable
+    total_effective_rate: float  # total_tax / gross_income (incl. gains)
+    ss_taxable_amount: float  # How much of SS benefits are taxable
 
 
 @dataclass
 class BracketFill:
     """How much room remains in the current and next brackets (for optimizer)."""
+
     current_rate: float
-    current_bracket_remaining: float   # Room left before hitting next bracket
+    current_bracket_remaining: float  # Room left before hitting next bracket
     next_rate: float | None
-    next_bracket_size: float | None    # Full width of the next bracket
+    next_bracket_size: float | None  # Full width of the next bracket
 
 
 # ---------------------------------------------------------------------------
 # Social Security taxability
 # ---------------------------------------------------------------------------
+
 
 def ss_taxable_amount(
     ss_gross: float,
@@ -144,9 +155,8 @@ def ss_taxable_amount(
         taxable = 0.5 * (provisional - lower_threshold)
     else:
         # Up to 85% of SS is taxable
-        taxable = (
-            0.5 * (upper_threshold - lower_threshold)
-            + 0.85 * (provisional - upper_threshold)
+        taxable = 0.5 * (upper_threshold - lower_threshold) + 0.85 * (
+            provisional - upper_threshold
         )
 
     return min(taxable, 0.85 * ss_gross)
@@ -155,6 +165,7 @@ def ss_taxable_amount(
 # ---------------------------------------------------------------------------
 # Core tax computation
 # ---------------------------------------------------------------------------
+
 
 def compute_ordinary_tax(
     gross_income: float,
@@ -194,11 +205,13 @@ def compute_ordinary_tax(
         marginal_rate = bracket.rate
 
         if include_bracket_detail:
-            detail.append({
-                "rate": bracket.rate,
-                "income_in_bracket": income_in_bracket,
-                "tax_in_bracket": tax_in_bracket,
-            })
+            detail.append(
+                {
+                    "rate": bracket.rate,
+                    "income_in_bracket": income_in_bracket,
+                    "tax_in_bracket": tax_in_bracket,
+                }
+            )
 
     effective_rate = tax_owed / gross_income if gross_income > 0 else 0.0
 
@@ -252,16 +265,18 @@ def compute_ltcg_tax(
     blended_rate = 0.0
 
     # 0% portion: gains that fall below zero_max
-    gains_in_zero = max(0.0, min(remaining_gains,
-                                  thresholds.zero_max - income_below_gains))
+    gains_in_zero = max(
+        0.0, min(remaining_gains, thresholds.zero_max - income_below_gains)
+    )
     gains_in_zero = max(0.0, gains_in_zero)
     remaining_gains -= gains_in_zero
     income_below_gains += gains_in_zero
 
     # 15% portion
     if remaining_gains > 0:
-        gains_in_fifteen = max(0.0, min(remaining_gains,
-                                         thresholds.fifteen_max - income_below_gains))
+        gains_in_fifteen = max(
+            0.0, min(remaining_gains, thresholds.fifteen_max - income_below_gains)
+        )
         ltcg_tax += gains_in_fifteen * 0.15
         remaining_gains -= gains_in_fifteen
         income_below_gains += gains_in_fifteen
@@ -357,6 +372,7 @@ def compute_total_tax(
 # Optimizer helpers
 # ---------------------------------------------------------------------------
 
+
 def marginal_rate_at(income: float, tax_year: TaxYear) -> float:
     """
     Return the marginal bracket rate that applies to the next dollar of
@@ -432,5 +448,7 @@ def roth_conversion_tax_cost(
         Incremental tax dollars owed due to the conversion.
     """
     tax_without = compute_ordinary_tax(existing_income, tax_year).tax_owed
-    tax_with = compute_ordinary_tax(existing_income + conversion_amount, tax_year).tax_owed
+    tax_with = compute_ordinary_tax(
+        existing_income + conversion_amount, tax_year
+    ).tax_owed
     return tax_with - tax_without

@@ -16,8 +16,9 @@ from dataclasses import dataclass
 @dataclass
 class LimitRow:
     """One row from the contribution_limits table."""
-    account_type: str   # '401k' | 'roth_401k' | 'ira' | 'roth_ira'
-    limit_type: str     # 'standard' | 'catchup'
+
+    account_type: str  # '401k' | 'roth_401k' | 'ira' | 'roth_ira'
+    limit_type: str  # 'standard' | 'catchup'
     amount: float
     catchup_age: int | None
 
@@ -28,11 +29,12 @@ class AnnualLimits:
     Resolved contribution limits for a specific person-year,
     incorporating age-based catch-up rules.
     """
+
     traditional_401k: float
     roth_401k: float
-    ira_combined: float          # IRA + Roth IRA share one combined limit per person
-    roth_ira_combined: float     # Same pool — kept separate for clarity in UI
-    total_401k: float            # traditional + roth 401k (combined employee limit)
+    ira_combined: float  # IRA + Roth IRA share one combined limit per person
+    roth_ira_combined: float  # Same pool — kept separate for clarity in UI
+    total_401k: float  # traditional + roth 401k (combined employee limit)
 
     # For the couple (NestEgg doubles the IRA limit since we treat both
     # Roth IRAs as one account; caller passes couple=True to get_limits())
@@ -43,7 +45,7 @@ class AnnualLimits:
 # SECURE 2.0 enhanced catch-up age window (ages 60–63 inclusive)
 _SECURE2_CATCHUP_MIN_AGE = 60
 _SECURE2_CATCHUP_MAX_AGE = 63
-_SECURE2_401K_CATCHUP_ENHANCED = 11_250.00   # Total catch-up (not additional)
+_SECURE2_401K_CATCHUP_ENHANCED = 11_250.00  # Total catch-up (not additional)
 _STANDARD_CATCHUP_AGE = 50
 
 
@@ -104,10 +106,10 @@ def get_limits(
 
     return AnnualLimits(
         traditional_401k=limit_401k,
-        roth_401k=limit_401k,            # Same employee limit as traditional
+        roth_401k=limit_401k,  # Same employee limit as traditional
         ira_combined=limit_ira_per_person,
         roth_ira_combined=limit_ira_per_person,
-        total_401k=limit_401k,           # Employee total (trad + roth share pool)
+        total_401k=limit_401k,  # Employee total (trad + roth share pool)
         ira_couple_combined=ira_couple,
         roth_ira_couple_combined=ira_couple,
     )
@@ -171,25 +173,29 @@ def validate_contributions(
 
     combined_401k = trad_401k + roth_401k
     if combined_401k > limits.total_401k:
-        warnings.append(ContributionWarning(
-            account_type="401k_combined",
-            requested=combined_401k,
-            allowed=limits.total_401k,
-            message=(
-                f"Combined 401(k) contributions ${combined_401k:,.0f} exceed "
-                f"the ${limits.total_401k:,.0f} limit for age {age}."
-            ),
-        ))
+        warnings.append(
+            ContributionWarning(
+                account_type="401k_combined",
+                requested=combined_401k,
+                allowed=limits.total_401k,
+                message=(
+                    f"Combined 401(k) contributions ${combined_401k:,.0f} exceed "
+                    f"the ${limits.total_401k:,.0f} limit for age {age}."
+                ),
+            )
+        )
 
     if roth_ira > limits.roth_ira_couple_combined:
-        warnings.append(ContributionWarning(
-            account_type="roth_ira",
-            requested=roth_ira,
-            allowed=limits.roth_ira_couple_combined,
-            message=(
-                f"Roth IRA contributions ${roth_ira:,.0f} exceed the combined "
-                f"couple limit of ${limits.roth_ira_couple_combined:,.0f}."
-            ),
-        ))
+        warnings.append(
+            ContributionWarning(
+                account_type="roth_ira",
+                requested=roth_ira,
+                allowed=limits.roth_ira_couple_combined,
+                message=(
+                    f"Roth IRA contributions ${roth_ira:,.0f} exceed the combined "
+                    f"couple limit of ${limits.roth_ira_couple_combined:,.0f}."
+                ),
+            )
+        )
 
     return warnings

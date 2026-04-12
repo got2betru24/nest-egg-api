@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import lifespan
-from app.routers import scenarios, projection, optimizer, social_security, tax
+from app.routers import scenarios, projection, optimizer, social_security, tax, inputs
 
 
 app = FastAPI(
@@ -26,9 +26,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",   # Vite dev server
+        "http://localhost:5173",  # Vite dev server
         "http://localhost:3000",
-        "http://nestegg.local",    # Production self-hosted
+        "http://nestegg.local",  # Production self-hosted
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -38,11 +38,12 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
-app.include_router(scenarios.router)
-app.include_router(projection.router)
-app.include_router(optimizer.router)
-app.include_router(social_security.router)
-app.include_router(tax.router)
+app.include_router(scenarios.router, prefix="/v1")
+app.include_router(inputs.router, prefix="/v1")
+app.include_router(projection.router, prefix="/v1")
+app.include_router(optimizer.router, prefix="/v1")
+app.include_router(social_security.router, prefix="/v1")
+app.include_router(tax.router, prefix="/v1")
 
 
 # ---------------------------------------------------------------------------

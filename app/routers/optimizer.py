@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException
 
 from ..database import fetchall, fetchone
 from ..models import OptimizerRequest, OptimizedStrategyOut
-from ..utils import current_year
 from ..engine.optimizer import OptimizerConfig, SSClaimingOption, run_optimizer
 from ..engine.social_security import AWIRow, BendPointRow, EarningsRecord, FRARule
 from .projection import _build_projection_inputs, _result_to_out
@@ -26,7 +25,7 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
         raise HTTPException(status_code=404, detail="Scenario not found")
 
     # Build base projection inputs
-    from ..models import ReturnScenario as RSEnum
+
     base_inputs = await _build_projection_inputs(
         body.scenario_id, body.optimize_against_scenario
     )
@@ -54,7 +53,9 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
             "SELECT use_spousal_benefit FROM ss_claiming WHERE person_id = %s",
             (spouse_row["id"],),
         )
-        spouse_use_spousal = bool(ss_claiming["use_spousal_benefit"]) if ss_claiming else True
+        spouse_use_spousal = (
+            bool(ss_claiming["use_spousal_benefit"]) if ss_claiming else True
+        )
         if not spouse_use_spousal:
             spouse_earnings_rows = await fetchall(
                 "SELECT earn_year, earnings FROM ss_earnings WHERE person_id = %s",
@@ -68,7 +69,9 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
     cola_rows_raw = await fetchall(
         "SELECT cola_year AS cola_year, rate FROM ss_cola ORDER BY cola_year"
     )
-    cola_rows = [{"cola_year": r["cola_year"], "rate": r["rate"]} for r in cola_rows_raw]
+    cola_rows = [
+        {"cola_year": r["cola_year"], "rate": r["rate"]} for r in cola_rows_raw
+    ]
 
     config = OptimizerConfig(
         primary_ss_options=[
@@ -78,7 +81,9 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
         spouse_ss_options=[
             SSClaimingOption(age, 0, _ss_label(age))
             for age in body.spouse_ss_claiming_ages
-        ] if spouse_row else [],
+        ]
+        if spouse_row
+        else [],
         roth_ladder_ceilings=body.roth_ladder_ceilings,
         test_roth_ladder=True,
         test_no_roth_ladder=True,
@@ -125,7 +130,10 @@ async def _load_ss_reference(person_id: int, birth_year: int):
     earnings_rows = await fetchall(
         "SELECT earn_year, earnings FROM ss_earnings WHERE person_id = %s", (person_id,)
     )
-    earnings = [EarningsRecord(year=r["earn_year"], earnings=r["earnings"]) for r in earnings_rows]
+    earnings = [
+        EarningsRecord(year=r["earn_year"], earnings=r["earnings"])
+        for r in earnings_rows
+    ]
 
     benefit_year = birth_year + 62
     bend_row_raw = await fetchone(
@@ -135,17 +143,36 @@ async def _load_ss_reference(person_id: int, birth_year: int):
     if not bend_row_raw:
         raise HTTPException(status_code=500, detail="No SS bend point data found")
 
-    awi_rows_raw = await fetchall("SELECT awi_year, awi_value FROM ss_awi ORDER BY awi_year")
+    awi_rows_raw = await fetchall(
+        "SELECT awi_year, awi_value FROM ss_awi ORDER BY awi_year"
+    )
     fra_rows_raw = await fetchall("SELECT * FROM ss_fra")
 
-    bend_row = BendPointRow(**{k: bend_row_raw[k] for k in [
-        "benefit_year", "bend_point_1", "bend_point_2",
-        "factor_below_1", "factor_1_to_2", "factor_above_2"
-    ]})
-    awi_rows = [AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows_raw]
-    fra_rules = [FRARule(**{k: r[k] for k in [
-        "birth_year_min", "birth_year_max", "fra_years", "fra_months"
-    ]}) for r in fra_rows_raw]
+    bend_row = BendPointRow(
+        **{
+            k: bend_row_raw[k]
+            for k in [
+                "benefit_year",
+                "bend_point_1",
+                "bend_point_2",
+                "factor_below_1",
+                "factor_1_to_2",
+                "factor_above_2",
+            ]
+        }
+    )
+    awi_rows = [
+        AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows_raw
+    ]
+    fra_rules = [
+        FRARule(
+            **{
+                k: r[k]
+                for k in ["birth_year_min", "birth_year_max", "fra_years", "fra_months"]
+            }
+        )
+        for r in fra_rows_raw
+    ]
 
     return earnings, bend_row, awi_rows, fra_rules
 

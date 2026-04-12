@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, AsyncGenerator
 
 import aiomysql
 from fastapi import FastAPI
@@ -55,6 +57,7 @@ def get_pool() -> aiomysql.Pool:
 # FastAPI lifespan (attach to app in main.py)
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_pool()
@@ -63,8 +66,50 @@ async def lifespan(app: FastAPI):
 
 
 # ---------------------------------------------------------------------------
+# Row type sanitization
+#
+# MySQL via aiomysql returns Python-typed values, but DECIMAL columns come
+# back as decimal.Decimal and DATE/DATETIME columns come back as Python
+# date/datetime objects. The engine exclusively uses float, int, str, and
+# bool. Normalizing here — at the single DB boundary — means no other layer
+# in the application ever needs to handle these types.
+#
+# Rules:
+#   Decimal  → float
+#   datetime → ISO 8601 string  (e.g. "2025-01-15T10:30:00")
+#   date     → ISO 8601 string  (e.g. "2025-01-15")
+#   int(0/1) fields that represent booleans are left as int; callers that
+#             need bool call bool() explicitly (already done in coerce helpers)
+# ---------------------------------------------------------------------------
+
+
+def _sanitize_value(val: Any) -> Any:
+    """Recursively normalize a single value from a DB row."""
+    if isinstance(val, Decimal):
+        return float(val)
+    if isinstance(val, datetime):
+        return val.isoformat()
+    if isinstance(val, date):
+        return val.isoformat()
+    return val
+
+
+def _sanitize_row(row: dict | None) -> dict | None:
+    """Normalize all values in a single DB row dict."""
+    if row is None:
+        return None
+    return {k: _sanitize_value(v) for k, v in row.items()}
+
+
+def _sanitize_rows(rows: list[dict]) -> list[dict]:
+    """Normalize all values in a list of DB row dicts."""
+    return [_sanitize_row(row) for row in rows]  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
 # Context managers for use in route handlers
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def get_conn() -> AsyncGenerator[aiomysql.Connection, None]:
@@ -80,7 +125,9 @@ async def get_conn() -> AsyncGenerator[aiomysql.Connection, None]:
 
 
 @asynccontextmanager
-async def get_cursor(conn: aiomysql.Connection) -> AsyncGenerator[aiomysql.DictCursor, None]:
+async def get_cursor(
+    conn: aiomysql.Connection,
+) -> AsyncGenerator[aiomysql.DictCursor, None]:
     """Yield a DictCursor from an existing connection."""
     async with conn.cursor(aiomysql.DictCursor) as cursor:
         yield cursor
@@ -88,20 +135,25 @@ async def get_cursor(conn: aiomysql.Connection) -> AsyncGenerator[aiomysql.DictC
 
 # ---------------------------------------------------------------------------
 # Convenience: run a single query and return all rows
+# All helpers run rows through _sanitize_row(s) before returning so callers
+# always receive plain Python floats, strings, and ints — never Decimal.
 # ---------------------------------------------------------------------------
+
 
 async def fetchall(query: str, args: tuple | None = None) -> list[dict]:
     async with get_conn() as conn:
         async with get_cursor(conn) as cur:
             await cur.execute(query, args)
-            return await cur.fetchall()
+            rows = await cur.fetchall()
+            return _sanitize_rows(rows)
 
 
 async def fetchone(query: str, args: tuple | None = None) -> dict | None:
     async with get_conn() as conn:
         async with get_cursor(conn) as cur:
             await cur.execute(query, args)
-            return await cur.fetchone()
+            row = await cur.fetchone()
+            return _sanitize_row(row)
 
 
 async def execute(query: str, args: tuple | None = None) -> int:

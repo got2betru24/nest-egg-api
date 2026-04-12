@@ -24,6 +24,7 @@ router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 # List all scenarios
 # ---------------------------------------------------------------------------
 
+
 @router.get("/", response_model=list[ScenarioOut])
 async def list_scenarios():
     rows = await fetchall(
@@ -36,6 +37,7 @@ async def list_scenarios():
 # ---------------------------------------------------------------------------
 # Create a scenario
 # ---------------------------------------------------------------------------
+
 
 @router.post("/", response_model=ScenarioOut, status_code=status.HTTP_201_CREATED)
 async def create_scenario(body: ScenarioCreate):
@@ -51,6 +53,7 @@ async def create_scenario(body: ScenarioCreate):
 # Get one scenario (header only)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{scenario_id}", response_model=ScenarioOut)
 async def get_scenario(scenario_id: int):
     row = await fetchone(
@@ -64,6 +67,7 @@ async def get_scenario(scenario_id: int):
 # ---------------------------------------------------------------------------
 # Update scenario name/description
 # ---------------------------------------------------------------------------
+
 
 @router.patch("/{scenario_id}", response_model=ScenarioOut)
 async def update_scenario(scenario_id: int, body: ScenarioUpdate):
@@ -94,6 +98,7 @@ async def update_scenario(scenario_id: int, body: ScenarioUpdate):
 # Soft-delete a scenario
 # ---------------------------------------------------------------------------
 
+
 @router.delete("/{scenario_id}", response_model=MessageResponse)
 async def delete_scenario(scenario_id: int):
     existing = await fetchone(
@@ -102,9 +107,7 @@ async def delete_scenario(scenario_id: int):
     if not existing:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    await execute(
-        "UPDATE scenarios SET is_active = 0 WHERE id = %s", (scenario_id,)
-    )
+    await execute("UPDATE scenarios SET is_active = 0 WHERE id = %s", (scenario_id,))
     return {"message": f"Scenario {scenario_id} deleted."}
 
 
@@ -112,7 +115,12 @@ async def delete_scenario(scenario_id: int):
 # Duplicate a scenario (deep copy)
 # ---------------------------------------------------------------------------
 
-@router.post("/{scenario_id}/duplicate", response_model=ScenarioOut, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/{scenario_id}/duplicate",
+    response_model=ScenarioOut,
+    status_code=status.HTTP_201_CREATED,
+)
 async def duplicate_scenario(scenario_id: int):
     source = await fetchone(
         "SELECT * FROM scenarios WHERE id = %s AND is_active = 1", (scenario_id,)
@@ -136,11 +144,18 @@ async def duplicate_scenario(scenario_id: int):
                 current_income, desired_retirement_income, healthcare_annual_cost,
                 enable_catchup_contributions, enable_roth_ladder, return_scenario)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (new_id, assumptions["inflation_rate"], assumptions["plan_to_age"],
-             assumptions["filing_status"], assumptions["current_income"],
-             assumptions["desired_retirement_income"], assumptions["healthcare_annual_cost"],
-             assumptions["enable_catchup_contributions"], assumptions["enable_roth_ladder"],
-             assumptions["return_scenario"]),
+            (
+                new_id,
+                assumptions["inflation_rate"],
+                assumptions["plan_to_age"],
+                assumptions["filing_status"],
+                assumptions["current_income"],
+                assumptions["desired_retirement_income"],
+                assumptions["healthcare_annual_cost"],
+                assumptions["enable_catchup_contributions"],
+                assumptions["enable_roth_ladder"],
+                assumptions["return_scenario"],
+            ),
         )
 
     # Copy persons (and their SS earnings / claiming)
@@ -152,13 +167,20 @@ async def duplicate_scenario(scenario_id: int):
         new_person_id = await execute(
             """INSERT INTO persons (scenario_id, role, birth_year, birth_month, planned_retirement_age)
                VALUES (%s,%s,%s,%s,%s)""",
-            (new_id, p["role"], p["birth_year"], p["birth_month"], p["planned_retirement_age"]),
+            (
+                new_id,
+                p["role"],
+                p["birth_year"],
+                p["birth_month"],
+                p["planned_retirement_age"],
+            ),
         )
         person_id_map[p["id"]] = new_person_id
 
         # Copy SS earnings
         earnings = await fetchall(
-            "SELECT earn_year, earnings FROM ss_earnings WHERE person_id = %s", (p["id"],)
+            "SELECT earn_year, earnings FROM ss_earnings WHERE person_id = %s",
+            (p["id"],),
         )
         if earnings:
             await _bulk_insert_earnings(new_person_id, earnings)
@@ -172,8 +194,13 @@ async def duplicate_scenario(scenario_id: int):
                 """INSERT INTO ss_claiming
                    (person_id, claim_age_years, claim_age_months, use_spousal_benefit, spousal_benefit_pct)
                    VALUES (%s,%s,%s,%s,%s)""",
-                (new_person_id, claiming["claim_age_years"], claiming["claim_age_months"],
-                 claiming["use_spousal_benefit"], claiming["spousal_benefit_pct"]),
+                (
+                    new_person_id,
+                    claiming["claim_age_years"],
+                    claiming["claim_age_months"],
+                    claiming["use_spousal_benefit"],
+                    claiming["spousal_benefit_pct"],
+                ),
             )
 
     # Copy accounts and contributions
@@ -186,8 +213,15 @@ async def duplicate_scenario(scenario_id: int):
                (scenario_id, account_type, label, current_balance,
                 return_conservative, return_base, return_optimistic)
                VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-            (new_id, acct["account_type"], acct["label"], acct["current_balance"],
-             acct["return_conservative"], acct["return_base"], acct["return_optimistic"]),
+            (
+                new_id,
+                acct["account_type"],
+                acct["label"],
+                acct["current_balance"],
+                acct["return_conservative"],
+                acct["return_base"],
+                acct["return_optimistic"],
+            ),
         )
         contrib = await fetchone(
             "SELECT * FROM contributions WHERE account_id = %s", (acct["id"],)
@@ -197,8 +231,13 @@ async def duplicate_scenario(scenario_id: int):
                 """INSERT INTO contributions
                    (account_id, annual_amount, employer_match_amount, enforce_irs_limits, solve_mode)
                    VALUES (%s,%s,%s,%s,%s)""",
-                (new_acct_id, contrib["annual_amount"], contrib["employer_match_amount"],
-                 contrib["enforce_irs_limits"], contrib["solve_mode"]),
+                (
+                    new_acct_id,
+                    contrib["annual_amount"],
+                    contrib["employer_match_amount"],
+                    contrib["enforce_irs_limits"],
+                    contrib["solve_mode"],
+                ),
             )
 
     # Copy Roth conversion overrides
@@ -210,8 +249,13 @@ async def duplicate_scenario(scenario_id: int):
             """INSERT INTO roth_conversions
                (scenario_id, plan_year, amount, source_account, is_optimizer_suggested)
                VALUES (%s,%s,%s,%s,%s)""",
-            (new_id, conv["plan_year"], conv["amount"],
-             conv["source_account"], conv["is_optimizer_suggested"]),
+            (
+                new_id,
+                conv["plan_year"],
+                conv["amount"],
+                conv["source_account"],
+                conv["is_optimizer_suggested"],
+            ),
         )
 
     row = await fetchone("SELECT * FROM scenarios WHERE id = %s", (new_id,))
@@ -221,6 +265,7 @@ async def duplicate_scenario(scenario_id: int):
 # ---------------------------------------------------------------------------
 # Full scenario load (all related data)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/{scenario_id}/full", response_model=FullScenarioOut)
 async def get_full_scenario(scenario_id: int):
@@ -274,6 +319,7 @@ async def get_full_scenario(scenario_id: int):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _format_scenario(row: dict) -> dict:
     return {
         **row,
@@ -284,6 +330,7 @@ def _format_scenario(row: dict) -> dict:
 
 async def _bulk_insert_earnings(person_id: int, earnings: list[dict]) -> None:
     from ..database import executemany
+
     await executemany(
         "INSERT INTO ss_earnings (person_id, earn_year, earnings) VALUES (%s, %s, %s)",
         [(person_id, e["earn_year"], e["earnings"]) for e in earnings],

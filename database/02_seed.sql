@@ -77,7 +77,58 @@ INSERT INTO contribution_limits (tax_year, account_type, limit_type, amount, cat
 ON DUPLICATE KEY UPDATE amount=VALUES(amount);
 
 -- -----------------------------------------------------------------------------
--- Social Security Bend Points by Benefit Year
+-- 2026 Federal Tax Brackets
+-- Includes OBBBA permanent bracket structures and inflation adjustments.
+-- -----------------------------------------------------------------------------
+INSERT INTO tax_brackets (tax_year, filing_status, rate, income_min, income_max) VALUES
+-- Married Filing Jointly
+(2026, 'married_filing_jointly', 0.10,      0.00,   24800.00),
+(2026, 'married_filing_jointly', 0.12,  24800.00,  100800.00),
+(2026, 'married_filing_jointly', 0.22, 100800.00,  211400.00),
+(2026, 'married_filing_jointly', 0.24, 211400.00,  403550.00),
+(2026, 'married_filing_jointly', 0.32, 403550.00,  512450.00),
+(2026, 'married_filing_jointly', 0.35, 512450.00,  768700.00),
+(2026, 'married_filing_jointly', 0.37, 768700.00,       NULL),
+-- Single
+(2026, 'single', 0.10,      0.00,   12400.00),
+(2026, 'single', 0.12,  12400.00,   50400.00),
+(2026, 'single', 0.22,  50400.00,  105700.00),
+(2026, 'single', 0.24, 105700.00,  201775.00),
+(2026, 'single', 0.32, 201775.00,  256225.00),
+(2026, 'single', 0.35, 256225.00,  640600.00),
+(2026, 'single', 0.37, 640600.00,       NULL)
+ON DUPLICATE KEY UPDATE rate=VALUES(rate), income_max=VALUES(income_max);
+
+-- -----------------------------------------------------------------------------
+-- 2026 Standard Deductions
+-- -----------------------------------------------------------------------------
+INSERT INTO standard_deductions (tax_year, filing_status, amount) VALUES
+(2026, 'married_filing_jointly',        32200.00),
+(2026, 'single',                        16100.00),
+(2026, 'married_filing_separately',     16100.00),
+(2026, 'head_of_household',             24150.00)
+ON DUPLICATE KEY UPDATE amount=VALUES(amount);
+
+-- -----------------------------------------------------------------------------
+-- 2026 IRS Contribution Limits
+-- Reflected SECURE 2.0 "Super Catch-Up" for ages 60-63.
+-- -----------------------------------------------------------------------------
+INSERT INTO contribution_limits (tax_year, account_type, limit_type, amount, catchup_age) VALUES
+-- 401(k) / Roth 401(k)
+(2026, '401k',      'standard', 24500.00, NULL),
+(2026, '401k',      'catchup',   8000.00,   50),   -- Standard catch-up (50-59, 64+)
+(2026, '401k',      'catchup',  11250.00,   60),   -- "Super" catch-up (60-63)
+(2026, 'roth_401k', 'standard', 24500.00, NULL),
+(2026, 'roth_401k', 'catchup',   8000.00,   50),
+(2026, 'roth_401k', 'catchup',  11250.00,   60),
+-- IRA / Roth IRA
+(2026, 'ira',       'standard',  7500.00, NULL),
+(2026, 'ira',       'catchup',   1100.00,   50),
+(2026, 'roth_ira',  'standard',  7500.00, NULL),
+(2026, 'roth_ira',  'catchup',   1100.00,   50)
+ON DUPLICATE KEY UPDATE amount=VALUES(amount);
+
+
 -- Benefit year = year person turns 62 (first year of eligibility)
 -- Source: SSA.gov - https://www.ssa.gov/oact/cola/bendpoints.html
 -- -----------------------------------------------------------------------------
@@ -98,6 +149,7 @@ INSERT INTO ss_bend_points (benefit_year, bend_point_1, bend_point_2, factor_bel
 (2023, 1115.00,  6721.00, 0.9, 0.32, 0.15),
 (2024, 1174.00,  7078.00, 0.9, 0.32, 0.15),
 (2025, 1226.00,  7391.00, 0.9, 0.32, 0.15)
+(2026, 1286.00,  7749.00, 0.9, 0.32, 0.15)
 ON DUPLICATE KEY UPDATE bend_point_1=VALUES(bend_point_1), bend_point_2=VALUES(bend_point_2);
 
 -- -----------------------------------------------------------------------------
@@ -120,7 +172,8 @@ INSERT INTO ss_cola (cola_year, rate) VALUES
 (2022, 0.0590),
 (2023, 0.0870),
 (2024, 0.0320),
-(2025, 0.0250)
+(2025, 0.0250),
+(2026, 0.0280)
 ON DUPLICATE KEY UPDATE rate=VALUES(rate);
 
 -- -----------------------------------------------------------------------------
@@ -168,7 +221,9 @@ INSERT INTO ss_awi (awi_year, awi_value) VALUES
 (2021, 60575.07),
 (2022, 63795.13),
 (2023, 66621.80),
-(2024, 69000.00)   -- Preliminary estimate; update when SSA publishes
+(2024, 69846.57),
+(2025, 72255.52),  -- SSA 2025 Intermediate Estimate
+(2026, 75264.81)   -- SSA 2026 Intermediate Estimate
 ON DUPLICATE KEY UPDATE awi_value=VALUES(awi_value);
 
 -- -----------------------------------------------------------------------------

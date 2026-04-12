@@ -15,16 +15,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
 # Data containers (populated from DB rows)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class EarningsRecord:
     """One year of actual earnings for a person."""
+
     year: int
     earnings: float
 
@@ -32,17 +34,19 @@ class EarningsRecord:
 @dataclass
 class BendPointRow:
     """One row from ss_bend_points table."""
-    benefit_year: int       # Year person turns 62
+
+    benefit_year: int  # Year person turns 62
     bend_point_1: float
     bend_point_2: float
-    factor_below_1: float   # Typically 0.90
-    factor_1_to_2: float    # Typically 0.32
-    factor_above_2: float   # Typically 0.15
+    factor_below_1: float  # Typically 0.90
+    factor_1_to_2: float  # Typically 0.32
+    factor_above_2: float  # Typically 0.15
 
 
 @dataclass
 class AWIRow:
     """One row from ss_awi table."""
+
     year: int
     awi_value: float
 
@@ -50,6 +54,7 @@ class AWIRow:
 @dataclass
 class FRARule:
     """Full Retirement Age rule for a birth year range."""
+
     birth_year_min: int
     birth_year_max: int
     fra_years: int
@@ -60,47 +65,52 @@ class FRARule:
 # Result containers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SSBenefitEstimate:
     """
     Full benefit estimate for one person at a given claiming age.
     """
+
     person_birth_year: int
     claim_age_years: int
     claim_age_months: int
     fra_years: int
     fra_months: int
-    aime: float                     # Average Indexed Monthly Earnings
-    pia: float                      # Primary Insurance Amount (at FRA)
-    monthly_benefit: float          # After early/late adjustment
-    annual_benefit: float           # monthly_benefit * 12
-    adjustment_factor: float        # Multiplier applied to PIA (< 1 early, > 1 late)
+    aime: float  # Average Indexed Monthly Earnings
+    pia: float  # Primary Insurance Amount (at FRA)
+    monthly_benefit: float  # After early/late adjustment
+    annual_benefit: float  # monthly_benefit * 12
+    adjustment_factor: float  # Multiplier applied to PIA (< 1 early, > 1 late)
     is_early: bool
     is_late: bool
-    months_from_fra: int            # Negative = early, Positive = late
+    months_from_fra: int  # Negative = early, Positive = late
 
 
 @dataclass
 class SSClaimingComparison:
     """Side-by-side comparison of early / FRA / late claiming."""
-    early: SSBenefitEstimate        # Age 62
-    fra: SSBenefitEstimate          # Full retirement age
-    late: SSBenefitEstimate         # Age 70
+
+    early: SSBenefitEstimate  # Age 62
+    fra: SSBenefitEstimate  # Full retirement age
+    late: SSBenefitEstimate  # Age 70
 
 
 @dataclass
 class SpousalBenefit:
     """Spousal benefit calculation result."""
+
     primary_pia: float
-    spousal_raw: float              # 50% of primary PIA
-    spousal_reduction: float        # Reduction if claiming before spouse's FRA
-    spousal_monthly: float          # Final monthly benefit
+    spousal_raw: float  # 50% of primary PIA
+    spousal_reduction: float  # Reduction if claiming before spouse's FRA
+    spousal_monthly: float  # Final monthly benefit
     spousal_annual: float
 
 
 # ---------------------------------------------------------------------------
 # Helper: Full Retirement Age lookup
 # ---------------------------------------------------------------------------
+
 
 def get_fra(birth_year: int, fra_rules: list[FRARule]) -> tuple[int, int]:
     """
@@ -122,6 +132,7 @@ def fra_in_months(birth_year: int, fra_rules: list[FRARule]) -> int:
 # ---------------------------------------------------------------------------
 # Earnings indexing
 # ---------------------------------------------------------------------------
+
 
 def index_earnings(
     earnings_records: list[EarningsRecord],
@@ -161,6 +172,7 @@ def index_earnings(
 # ---------------------------------------------------------------------------
 # AIME calculation
 # ---------------------------------------------------------------------------
+
 
 def compute_aime(
     earnings_records: list[EarningsRecord],
@@ -218,6 +230,7 @@ def compute_aime(
 # PIA calculation
 # ---------------------------------------------------------------------------
 
+
 def compute_pia(aime: float, bend_point_row: BendPointRow) -> float:
     """
     Compute Primary Insurance Amount (PIA) using the bend point formula.
@@ -248,6 +261,7 @@ def compute_pia(aime: float, bend_point_row: BendPointRow) -> float:
 # ---------------------------------------------------------------------------
 # Claiming age adjustments
 # ---------------------------------------------------------------------------
+
 
 def claiming_adjustment_factor(
     claim_age_years: int,
@@ -301,6 +315,7 @@ def claiming_adjustment_factor(
 # ---------------------------------------------------------------------------
 # Full benefit estimate
 # ---------------------------------------------------------------------------
+
 
 def estimate_benefit(
     birth_year: int,
@@ -392,6 +407,7 @@ def build_claiming_comparison(
 # Spousal benefit
 # ---------------------------------------------------------------------------
 
+
 def compute_spousal_benefit(
     primary_pia: float,
     spouse_claim_age_years: int,
@@ -429,8 +445,7 @@ def compute_spousal_benefit(
         if months_early <= 36:
             reduction = months_early * (25 / 36) / 100
         else:
-            reduction = (36 * (25 / 36) / 100
-                         + (months_early - 36) * (5 / 12) / 100)
+            reduction = 36 * (25 / 36) / 100 + (months_early - 36) * (5 / 12) / 100
 
     final_monthly = round(raw_spousal * (1 - reduction), 2)
 
@@ -447,12 +462,13 @@ def compute_spousal_benefit(
 # Projection helper: benefit amount for a given calendar year
 # ---------------------------------------------------------------------------
 
+
 def annual_benefit_in_year(
     benefit_estimate: SSBenefitEstimate,
-    claim_start_year: int,       # Calendar year benefits begin
-    projection_year: int,        # Calendar year being projected
-    cola_rows: list[dict],       # [{"cola_year": int, "rate": float}]
-    assumed_cola: float = 0.025, # Assumed future COLA rate
+    claim_start_year: int,  # Calendar year benefits begin
+    projection_year: int,  # Calendar year being projected
+    cola_rows: list[dict],  # [{"cola_year": int, "rate": float}]
+    assumed_cola: float = 0.025,  # Assumed future COLA rate
 ) -> float:
     """
     Return the annual SS benefit in a given projection year, including COLA.
@@ -475,6 +491,6 @@ def annual_benefit_in_year(
 
     for yr in range(claim_start_year + 1, projection_year + 1):
         cola = cola_map.get(yr, assumed_cola)
-        benefit *= (1 + cola)
+        benefit *= 1 + cola
 
     return round(benefit, 2)

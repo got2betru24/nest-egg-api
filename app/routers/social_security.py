@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from ..database import execute, executemany, fetchall, fetchone
 from ..models import (
@@ -31,6 +31,7 @@ router = APIRouter(prefix="/social-security", tags=["social_security"])
 # ---------------------------------------------------------------------------
 # Upload SS earnings CSV
 # ---------------------------------------------------------------------------
+
 
 @router.post("/earnings/{person_id}/upload", response_model=MessageResponse)
 async def upload_earnings(person_id: int, file: UploadFile = File(...)):
@@ -58,6 +59,7 @@ async def upload_earnings(person_id: int, file: UploadFile = File(...)):
 # Get earnings history for a person
 # ---------------------------------------------------------------------------
 
+
 @router.get("/earnings/{person_id}", response_model=list[dict])
 async def get_earnings(person_id: int):
     person = await fetchone("SELECT id FROM persons WHERE id = %s", (person_id,))
@@ -76,6 +78,7 @@ async def get_earnings(person_id: int):
 # Save / update SS claiming strategy for a person
 # ---------------------------------------------------------------------------
 
+
 @router.put("/claiming/{person_id}", response_model=SSClaimingOut)
 async def upsert_claiming(person_id: int, body: SSClaimingCreate):
     person = await fetchone("SELECT id FROM persons WHERE id = %s", (person_id,))
@@ -91,8 +94,13 @@ async def upsert_claiming(person_id: int, body: SSClaimingCreate):
                claim_age_years = %s, claim_age_months = %s,
                use_spousal_benefit = %s, spousal_benefit_pct = %s
                WHERE person_id = %s""",
-            (body.claim_age_years, body.claim_age_months,
-             body.use_spousal_benefit, body.spousal_benefit_pct, person_id),
+            (
+                body.claim_age_years,
+                body.claim_age_months,
+                body.use_spousal_benefit,
+                body.spousal_benefit_pct,
+                person_id,
+            ),
         )
     else:
         await execute(
@@ -100,8 +108,13 @@ async def upsert_claiming(person_id: int, body: SSClaimingCreate):
                (person_id, claim_age_years, claim_age_months,
                 use_spousal_benefit, spousal_benefit_pct)
                VALUES (%s, %s, %s, %s, %s)""",
-            (person_id, body.claim_age_years, body.claim_age_months,
-             body.use_spousal_benefit, body.spousal_benefit_pct),
+            (
+                person_id,
+                body.claim_age_years,
+                body.claim_age_months,
+                body.use_spousal_benefit,
+                body.spousal_benefit_pct,
+            ),
         )
 
     row = await fetchone("SELECT * FROM ss_claiming WHERE person_id = %s", (person_id,))
@@ -112,30 +125,62 @@ async def upsert_claiming(person_id: int, body: SSClaimingCreate):
 # Benefit estimate for a specific claiming age
 # ---------------------------------------------------------------------------
 
+
 @router.get("/estimate/{person_id}", response_model=SSBenefitEstimateOut)
 async def get_benefit_estimate(
     person_id: int,
     claim_age_years: int = 67,
     claim_age_months: int = 0,
 ):
-    person, earnings_rows, bend_row, awi_rows, fra_rows, assumptions = \
-        await _load_ss_data(person_id)
+    (
+        person,
+        earnings_rows,
+        bend_row,
+        awi_rows,
+        fra_rows,
+        assumptions,
+    ) = await _load_ss_data(person_id)
 
-    earnings = [EarningsRecord(year=r["earn_year"], earnings=r["earnings"]) for r in earnings_rows]
+    earnings = [
+        EarningsRecord(year=r["earn_year"], earnings=r["earnings"])
+        for r in earnings_rows
+    ]
 
     result = estimate_benefit(
         birth_year=person["birth_year"],
         claim_age_years=claim_age_years,
         claim_age_months=claim_age_months,
         earnings_records=earnings,
-        awi_rows=[AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows],
-        bend_point_row=BendPointRow(**{k: bend_row[k] for k in [
-            "benefit_year", "bend_point_1", "bend_point_2",
-            "factor_below_1", "factor_1_to_2", "factor_above_2"
-        ]}),
-        fra_rules=[FRARule(**{k: r[k] for k in [
-            "birth_year_min", "birth_year_max", "fra_years", "fra_months"
-        ]}) for r in fra_rows],
+        awi_rows=[
+            AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows
+        ],
+        bend_point_row=BendPointRow(
+            **{
+                k: bend_row[k]
+                for k in [
+                    "benefit_year",
+                    "bend_point_1",
+                    "bend_point_2",
+                    "factor_below_1",
+                    "factor_1_to_2",
+                    "factor_above_2",
+                ]
+            }
+        ),
+        fra_rules=[
+            FRARule(
+                **{
+                    k: r[k]
+                    for k in [
+                        "birth_year_min",
+                        "birth_year_max",
+                        "fra_years",
+                        "fra_months",
+                    ]
+                }
+            )
+            for r in fra_rows
+        ],
         assumed_future_income=assumptions["current_income"] if assumptions else 0.0,
         current_age=current_year() - person["birth_year"],
         retirement_age=person["planned_retirement_age"],
@@ -148,24 +193,56 @@ async def get_benefit_estimate(
 # Early / FRA / late comparison
 # ---------------------------------------------------------------------------
 
+
 @router.get("/comparison/{person_id}", response_model=SSClaimingComparisonOut)
 async def get_claiming_comparison(person_id: int):
-    person, earnings_rows, bend_row, awi_rows, fra_rows, assumptions = \
-        await _load_ss_data(person_id)
+    (
+        person,
+        earnings_rows,
+        bend_row,
+        awi_rows,
+        fra_rows,
+        assumptions,
+    ) = await _load_ss_data(person_id)
 
-    earnings = [EarningsRecord(year=r["earn_year"], earnings=r["earnings"]) for r in earnings_rows]
+    earnings = [
+        EarningsRecord(year=r["earn_year"], earnings=r["earnings"])
+        for r in earnings_rows
+    ]
 
     comparison = build_claiming_comparison(
         birth_year=person["birth_year"],
         earnings_records=earnings,
-        awi_rows=[AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows],
-        bend_point_row=BendPointRow(**{k: bend_row[k] for k in [
-            "benefit_year", "bend_point_1", "bend_point_2",
-            "factor_below_1", "factor_1_to_2", "factor_above_2"
-        ]}),
-        fra_rules=[FRARule(**{k: r[k] for k in [
-            "birth_year_min", "birth_year_max", "fra_years", "fra_months"
-        ]}) for r in fra_rows],
+        awi_rows=[
+            AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows
+        ],
+        bend_point_row=BendPointRow(
+            **{
+                k: bend_row[k]
+                for k in [
+                    "benefit_year",
+                    "bend_point_1",
+                    "bend_point_2",
+                    "factor_below_1",
+                    "factor_1_to_2",
+                    "factor_above_2",
+                ]
+            }
+        ),
+        fra_rules=[
+            FRARule(
+                **{
+                    k: r[k]
+                    for k in [
+                        "birth_year_min",
+                        "birth_year_max",
+                        "fra_years",
+                        "fra_months",
+                    ]
+                }
+            )
+            for r in fra_rows
+        ],
         assumed_future_income=assumptions["current_income"] if assumptions else 0.0,
         current_age=current_year() - person["birth_year"],
         retirement_age=person["planned_retirement_age"],
@@ -181,6 +258,7 @@ async def get_claiming_comparison(person_id: int):
 # ---------------------------------------------------------------------------
 # Shared data loader
 # ---------------------------------------------------------------------------
+
 
 async def _load_ss_data(person_id: int):
     person = await fetchone("SELECT * FROM persons WHERE id = %s", (person_id,))
@@ -200,7 +278,9 @@ async def _load_ss_data(person_id: int):
     if not bend_row:
         raise HTTPException(status_code=500, detail="No SS bend point data available")
 
-    awi_rows = await fetchall("SELECT awi_year, awi_value FROM ss_awi ORDER BY awi_year")
+    awi_rows = await fetchall(
+        "SELECT awi_year, awi_value FROM ss_awi ORDER BY awi_year"
+    )
     fra_rows = await fetchall("SELECT * FROM ss_fra")
 
     assumptions = await fetchone(

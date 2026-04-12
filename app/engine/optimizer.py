@@ -40,16 +40,17 @@ from .social_security import (
     estimate_benefit,
     get_fra,
 )
-from .tax_engine import TaxYear, bracket_fill_at
 
 
 # ---------------------------------------------------------------------------
 # Optimizer configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SSClaimingOption:
     """One Social Security claiming age option to evaluate."""
+
     claim_age_years: int
     claim_age_months: int
     label: str  # e.g. "Early (62)", "FRA (67)", "Late (70)"
@@ -61,22 +62,29 @@ class OptimizerConfig:
     Configuration space for the optimizer.
     Defines what parameter combinations to search.
     """
+
     # SS claiming ages to test for primary
-    primary_ss_options: list[SSClaimingOption] = field(default_factory=lambda: [
-        SSClaimingOption(62, 0, "Early (62)"),
-        SSClaimingOption(67, 0, "FRA (67)"),
-        SSClaimingOption(70, 0, "Late (70)"),
-    ])
+    primary_ss_options: list[SSClaimingOption] = field(
+        default_factory=lambda: [
+            SSClaimingOption(62, 0, "Early (62)"),
+            SSClaimingOption(67, 0, "FRA (67)"),
+            SSClaimingOption(70, 0, "Late (70)"),
+        ]
+    )
 
     # SS claiming ages to test for spouse (if applicable)
-    spouse_ss_options: list[SSClaimingOption] = field(default_factory=lambda: [
-        SSClaimingOption(62, 0, "Early (62)"),
-        SSClaimingOption(67, 0, "FRA (67)"),
-        SSClaimingOption(70, 0, "Late (70)"),
-    ])
+    spouse_ss_options: list[SSClaimingOption] = field(
+        default_factory=lambda: [
+            SSClaimingOption(62, 0, "Early (62)"),
+            SSClaimingOption(67, 0, "FRA (67)"),
+            SSClaimingOption(70, 0, "Late (70)"),
+        ]
+    )
 
     # Roth ladder bracket ceilings to test
-    roth_ladder_ceilings: list[float] = field(default_factory=lambda: [0.12, 0.22, 0.24])
+    roth_ladder_ceilings: list[float] = field(
+        default_factory=lambda: [0.12, 0.22, 0.24]
+    )
 
     # Whether to test with/without Roth ladder
     test_roth_ladder: bool = True
@@ -90,11 +98,13 @@ class OptimizerConfig:
 # Optimizer result
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class OptimizedStrategy:
     """
     The recommended strategy and its rationale.
     """
+
     # SS claiming recommendations
     primary_ss_claim_age_years: int
     primary_ss_claim_age_months: int
@@ -111,7 +121,7 @@ class OptimizedStrategy:
     projection: ProjectionResult
 
     # Scoring
-    score: float                        # Higher = better
+    score: float  # Higher = better
     portfolio_survives: bool
     residual_balance: float
     total_tax_saved_vs_no_ladder: float | None
@@ -124,6 +134,7 @@ class OptimizedStrategy:
 @dataclass
 class OptimizationCandidate:
     """One evaluated configuration in the optimizer search."""
+
     primary_ss_label: str
     spouse_ss_label: str | None
     roth_ladder_enabled: bool
@@ -136,6 +147,7 @@ class OptimizationCandidate:
 # ---------------------------------------------------------------------------
 # Scoring function
 # ---------------------------------------------------------------------------
+
 
 def score_projection(result: ProjectionResult, plan_to_age: int) -> float:
     """
@@ -168,6 +180,7 @@ def score_projection(result: ProjectionResult, plan_to_age: int) -> float:
 # ---------------------------------------------------------------------------
 # SS claiming sensitivity
 # ---------------------------------------------------------------------------
+
 
 def breakeven_analysis(
     early_annual: float,
@@ -209,6 +222,7 @@ def breakeven_analysis(
 # Roth ladder optimizer
 # ---------------------------------------------------------------------------
 
+
 def optimal_roth_ladder_ceiling(
     base_inputs: ProjectionInputs,
     ceilings_to_test: list[float] = None,
@@ -232,7 +246,8 @@ def optimal_roth_ladder_ceiling(
     for ceiling in ceilings_to_test:
         test_inputs = ProjectionInputs(
             **{
-                k: v for k, v in base_inputs.__dict__.items()
+                k: v
+                for k, v in base_inputs.__dict__.items()
                 if k not in ("roth_ladder_target_bracket",)
             }
         )
@@ -251,6 +266,7 @@ def optimal_roth_ladder_ceiling(
 # ---------------------------------------------------------------------------
 # Main optimizer
 # ---------------------------------------------------------------------------
+
 
 def run_optimizer(
     base_inputs: ProjectionInputs,
@@ -320,8 +336,12 @@ def run_optimizer(
         for opt in config.spouse_ss_options:
             if spouse_use_spousal_benefit:
                 # Spousal benefit: use primary PIA at FRA claiming age for reference
-                fra_est = primary_estimates.get("FRA (67)") or list(primary_estimates.values())[0]
+                fra_est = (
+                    primary_estimates.get("FRA (67)")
+                    or list(primary_estimates.values())[0]
+                )
                 from .social_security import compute_spousal_benefit
+
                 spousal = compute_spousal_benefit(
                     primary_pia=fra_est.pia,
                     spouse_claim_age_years=opt.claim_age_years,
@@ -333,9 +353,12 @@ def run_optimizer(
                 # Wrap in SSBenefitEstimate for projection engine
                 spouse_fra_y, spouse_fra_m = get_fra(spouse_birth_year, fra_rules)
                 from .social_security import claiming_adjustment_factor
+
                 adj, months = claiming_adjustment_factor(
-                    opt.claim_age_years, opt.claim_age_months,
-                    spouse_fra_y, spouse_fra_m,
+                    opt.claim_age_years,
+                    opt.claim_age_months,
+                    spouse_fra_y,
+                    spouse_fra_m,
                 )
                 est = SSBenefitEstimate(
                     person_birth_year=spouse_birth_year,
@@ -383,6 +406,7 @@ def run_optimizer(
         primary_claim_year = primary_birth_year + p_opt.claim_age_years
 
         from .projection import PersonInputs
+
         p_inputs = PersonInputs(
             birth_year=primary_birth_year,
             retirement_age=base_inputs.primary.retirement_age,
@@ -400,9 +424,12 @@ def run_optimizer(
             s_est = spouse_estimates[s_opt_maybe.label]
             spouse_claim_year = spouse_birth_year + s_opt_maybe.claim_age_years
             from .projection import PersonInputs as PI
+
             s_inputs = PI(
                 birth_year=spouse_birth_year,
-                retirement_age=base_inputs.spouse.retirement_age if base_inputs.spouse else 55,
+                retirement_age=base_inputs.spouse.retirement_age
+                if base_inputs.spouse
+                else 55,
                 ss_benefit=s_est,
                 ss_claim_start_year=spouse_claim_year,
                 ss_cola_rows=ss_cola_rows,
@@ -414,6 +441,7 @@ def run_optimizer(
 
         # Build test inputs
         import dataclasses
+
         test_inputs = dataclasses.replace(
             base_inputs,
             primary=p_inputs,
@@ -447,9 +475,7 @@ def run_optimizer(
     rationale: list[str] = []
     bc = best_candidate
 
-    rationale.append(
-        f"Recommended SS claiming age: {bc.primary_ss_label} for primary."
-    )
+    rationale.append(f"Recommended SS claiming age: {bc.primary_ss_label} for primary.")
     if bc.spouse_ss_label:
         rationale.append(f"Spouse SS claiming: {bc.spouse_ss_label}.")
 
@@ -459,7 +485,9 @@ def run_optimizer(
             f"{bc.roth_ladder_ceiling:.0%} bracket each year."
         )
     else:
-        rationale.append("No Roth conversion ladder (not beneficial for this scenario).")
+        rationale.append(
+            "No Roth conversion ladder (not beneficial for this scenario)."
+        )
 
     if bc.survives:
         rationale.append(
@@ -478,8 +506,7 @@ def run_optimizer(
     if no_ladder_candidates and bc.roth_ladder_enabled:
         best_no_ladder = max(no_ladder_candidates, key=lambda c: c.score)
         tax_saved = (
-            best_no_ladder.projection.total_tax_paid
-            - bc.projection.total_tax_paid
+            best_no_ladder.projection.total_tax_paid - bc.projection.total_tax_paid
         )
         if tax_saved > 0:
             rationale.append(
@@ -494,12 +521,18 @@ def run_optimizer(
             [o.label for o in config.primary_ss_options].index(bc.primary_ss_label)
         ].claim_age_months,
         primary_ss_claim_label=bc.primary_ss_label,
-        spouse_ss_claim_age_years=bc.spouse_ss_label and config.spouse_ss_options[
+        spouse_ss_claim_age_years=bc.spouse_ss_label
+        and config.spouse_ss_options[
             [o.label for o in config.spouse_ss_options].index(bc.spouse_ss_label)
-        ].claim_age_years if bc.spouse_ss_label and config.spouse_ss_options else None,
-        spouse_ss_claim_age_months=bc.spouse_ss_label and config.spouse_ss_options[
+        ].claim_age_years
+        if bc.spouse_ss_label and config.spouse_ss_options
+        else None,
+        spouse_ss_claim_age_months=bc.spouse_ss_label
+        and config.spouse_ss_options[
             [o.label for o in config.spouse_ss_options].index(bc.spouse_ss_label)
-        ].claim_age_months if bc.spouse_ss_label and config.spouse_ss_options else None,
+        ].claim_age_months
+        if bc.spouse_ss_label and config.spouse_ss_options
+        else None,
         spouse_ss_claim_label=bc.spouse_ss_label,
         roth_ladder_enabled=bc.roth_ladder_enabled,
         roth_ladder_target_bracket=bc.roth_ladder_ceiling,

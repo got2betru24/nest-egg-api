@@ -8,14 +8,14 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class FilingStatus(str, Enum):
     MFJ = "married_filing_jointly"
@@ -52,6 +52,7 @@ class BridgeMethodEnum(str, Enum):
 # Scenario CRUD
 # ---------------------------------------------------------------------------
 
+
 class ScenarioBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     description: str | None = None
@@ -78,6 +79,7 @@ class ScenarioOut(ScenarioBase):
 # Person
 # ---------------------------------------------------------------------------
 
+
 class PersonBase(BaseModel):
     role: str = Field(..., pattern="^(primary|spouse)$")
     birth_year: int = Field(..., ge=1940, le=2005)
@@ -100,15 +102,18 @@ class PersonOut(PersonBase):
 # Scenario Assumptions
 # ---------------------------------------------------------------------------
 
+
 class AssumptionsBase(BaseModel):
     inflation_rate: float = Field(0.03, ge=0.0, le=0.20)
     plan_to_age: int = Field(90, ge=70, le=105)
     filing_status: FilingStatus = FilingStatus.MFJ
     current_income: float = Field(0.0, ge=0.0)
-    desired_retirement_income: float = Field(0.0, ge=0.0,
-        description="In today's dollars")
-    healthcare_annual_cost: float = Field(0.0, ge=0.0,
-        description="Annual pre-Medicare healthcare cost (today's dollars)")
+    desired_retirement_income: float = Field(
+        0.0, ge=0.0, description="In today's dollars"
+    )
+    healthcare_annual_cost: float = Field(
+        0.0, ge=0.0, description="Annual pre-Medicare healthcare cost (today's dollars)"
+    )
     enable_catchup_contributions: bool = False
     enable_roth_ladder: bool = False
     return_scenario: ReturnScenario = ReturnScenario.BASE
@@ -128,6 +133,7 @@ class AssumptionsOut(AssumptionsBase):
 # ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------
+
 
 class AccountReturnAssumptions(BaseModel):
     return_conservative: float = Field(0.04, ge=0.0, le=0.30)
@@ -165,6 +171,7 @@ class AccountOut(AccountBase):
 # Contributions
 # ---------------------------------------------------------------------------
 
+
 class ContributionBase(BaseModel):
     annual_amount: float = Field(0.0, ge=0.0)
     employer_match_amount: float = Field(0.0, ge=0.0)
@@ -186,6 +193,7 @@ class ContributionOut(ContributionBase):
 # ---------------------------------------------------------------------------
 # Social Security
 # ---------------------------------------------------------------------------
+
 
 class SSEarningsRow(BaseModel):
     year: int = Field(..., ge=1950, le=2040)
@@ -240,6 +248,7 @@ class SSClaimingComparisonOut(BaseModel):
 # Roth Conversions
 # ---------------------------------------------------------------------------
 
+
 class RothConversionOverride(BaseModel):
     plan_year: int = Field(..., ge=2024, le=2080)
     amount: float = Field(..., ge=0.0)
@@ -257,6 +266,7 @@ class RothConversionOut(RothConversionOverride):
 # ---------------------------------------------------------------------------
 # Projection request/response
 # ---------------------------------------------------------------------------
+
 
 class ProjectionRequest(BaseModel):
     scenario_id: int
@@ -343,19 +353,17 @@ class ProjectionResultOut(BaseModel):
 # Optimizer request/response
 # ---------------------------------------------------------------------------
 
+
 class OptimizerRequest(BaseModel):
     scenario_id: int
     primary_ss_claiming_ages: list[int] = Field(
-        [62, 67, 70],
-        description="Claiming ages to test for primary (years only)"
+        [62, 67, 70], description="Claiming ages to test for primary (years only)"
     )
     spouse_ss_claiming_ages: list[int] = Field(
-        [62, 67, 70],
-        description="Claiming ages to test for spouse"
+        [62, 67, 70], description="Claiming ages to test for spouse"
     )
     roth_ladder_ceilings: list[float] = Field(
-        [0.12, 0.22, 0.24],
-        description="Bracket ceiling rates to test for Roth ladder"
+        [0.12, 0.22, 0.24], description="Bracket ceiling rates to test for Roth ladder"
     )
     optimize_against_scenario: ReturnScenario = ReturnScenario.BASE
 
@@ -380,6 +388,7 @@ class OptimizedStrategyOut(BaseModel):
 # Scenario full save/load (for scenario bar)
 # ---------------------------------------------------------------------------
 
+
 class FullScenarioOut(BaseModel):
     scenario: ScenarioOut
     assumptions: AssumptionsOut | None
@@ -393,6 +402,7 @@ class FullScenarioOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Generic responses
 # ---------------------------------------------------------------------------
+
 
 class MessageResponse(BaseModel):
     message: str

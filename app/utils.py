@@ -51,7 +51,9 @@ def parse_ss_earnings_csv(content: bytes) -> list[dict]:
             raise ValueError(f"Invalid data on row {i}: {e}")
 
         if year_val < 1950 or year_val > 2040:
-            raise ValueError(f"Row {i}: year {year_val} is out of expected range 1950–2040.")
+            raise ValueError(
+                f"Row {i}: year {year_val} is out of expected range 1950–2040."
+            )
         if earnings_val < 0:
             raise ValueError(f"Row {i}: earnings cannot be negative.")
 

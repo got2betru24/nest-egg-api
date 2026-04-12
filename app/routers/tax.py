@@ -5,15 +5,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ..database import fetchall, fetchone
 from ..utils import current_year
 from ..engine.tax_engine import (
-    BracketRow, TaxYear, LTCGThresholds,
-    compute_ordinary_tax, compute_total_tax,
-    bracket_fill_at, roth_conversion_tax_cost,
+    BracketRow,
+    TaxYear,
+    LTCGThresholds,
+    compute_total_tax,
+    bracket_fill_at,
+    roth_conversion_tax_cost,
 )
 
 router = APIRouter(prefix="/tax", tags=["tax"])
@@ -99,7 +102,9 @@ async def roth_conversion_cost(body: RothConversionEstimateRequest):
         "conversion_amount": body.conversion_amount,
         "existing_income": body.existing_income,
         "incremental_tax_cost": cost,
-        "effective_conversion_rate": cost / body.conversion_amount if body.conversion_amount else 0,
+        "effective_conversion_rate": cost / body.conversion_amount
+        if body.conversion_amount
+        else 0,
         "current_marginal_rate": fill.current_rate,
         "bracket_room_remaining": fill.current_bracket_remaining,
         "next_bracket_rate": fill.next_rate,
@@ -133,11 +138,14 @@ async def _load_tax_year(year: int | None, filing_status: str) -> TaxYear:
 
     return TaxYear(
         year=yr,
-        brackets=[BracketRow(
-            rate=r["rate"],
-            income_min=r["income_min"],
-            income_max=r["income_max"],
-        ) for r in brackets_raw],
+        brackets=[
+            BracketRow(
+                rate=r["rate"],
+                income_min=r["income_min"],
+                income_max=r["income_max"],
+            )
+            for r in brackets_raw
+        ],
         standard_deduction=std["amount"] if std else 30000.0,
         filing_status=filing_status,
     )

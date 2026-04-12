@@ -24,42 +24,45 @@ from enum import Enum
 
 class BridgeMethod(str, Enum):
     RULE_OF_55 = "rule_of_55"
-    SEPP_RMD = "sepp_rmd"               # 72(t) RMD method
+    SEPP_RMD = "sepp_rmd"  # 72(t) RMD method
     SEPP_FIXED_AMORTIZATION = "sepp_fixed_amortization"
     SEPP_FIXED_ANNUITIZATION = "sepp_fixed_annuitization"
-    TAXABLE_ONLY = "taxable_only"       # HYSA + brokerage only
-    MIXED = "mixed"                     # Combination
+    TAXABLE_ONLY = "taxable_only"  # HYSA + brokerage only
+    MIXED = "mixed"  # Combination
 
 
 @dataclass
 class BridgeInput:
     """Inputs needed to calculate bridge strategy amounts."""
-    retirement_age: int                 # Age at retirement
-    retirement_year: int                # Calendar year of retirement
+
+    retirement_age: int  # Age at retirement
+    retirement_year: int  # Calendar year of retirement
     birth_year: int
-    account_balance_401k: float         # Traditional 401k balance at retirement
-    account_balance_ira: float          # Traditional IRA balance (if any)
+    account_balance_401k: float  # Traditional 401k balance at retirement
+    account_balance_ira: float  # Traditional IRA balance (if any)
     account_balance_hysa: float
     account_balance_brokerage: float
-    annual_income_need: float           # Total gross income needed during bridge
-    expected_return: float              # Expected annual return during bridge
-    irs_interest_rate: float = 0.05     # 72(t) uses 120% of mid-term AFR; approximate
+    annual_income_need: float  # Total gross income needed during bridge
+    expected_return: float  # Expected annual return during bridge
+    irs_interest_rate: float = 0.05  # 72(t) uses 120% of mid-term AFR; approximate
 
 
 @dataclass
 class SEPPCalculation:
     """Result of a 72(t) SEPP calculation."""
+
     method: BridgeMethod
     annual_amount: float
     monthly_amount: float
     account_balance_used: float
-    modification_end_age: float         # Later of age 59½ or 5 years from start
-    is_locked_in: bool = True           # SEPP cannot be changed without penalty
+    modification_end_age: float  # Later of age 59½ or 5 years from start
+    is_locked_in: bool = True  # SEPP cannot be changed without penalty
 
 
 @dataclass
 class BridgeYear:
     """Income sources for one year of the bridge period."""
+
     calendar_year: int
     age: int
     withdrawal_hysa: float
@@ -74,9 +77,10 @@ class BridgeYear:
 @dataclass
 class BridgeStrategy:
     """Full bridge strategy recommendation."""
+
     method: BridgeMethod
     bridge_start_year: int
-    bridge_end_year: int                # Year of age 59½ (approximately)
+    bridge_end_year: int  # Year of age 59½ (approximately)
     bridge_years: list[BridgeYear]
     sepp_detail: SEPPCalculation | None
     total_taxable_withdrawn: float
@@ -88,10 +92,11 @@ class BridgeStrategy:
 # 72(t) SEPP calculations
 # ---------------------------------------------------------------------------
 
+
 def sepp_rmd_method(
     account_balance: float,
     age: int,
-    life_expectancy_factor: float = 27.4,   # IRS Uniform Lifetime Table; 55yo ~ 29.6
+    life_expectancy_factor: float = 27.4,  # IRS Uniform Lifetime Table; 55yo ~ 29.6
 ) -> float:
     """
     72(t) Required Minimum Distribution method.
@@ -103,10 +108,26 @@ def sepp_rmd_method(
 
 # IRS Uniform Lifetime Table (abbreviated, ages 50–70)
 _UNIFORM_LIFETIME_FACTORS = {
-    50: 34.2, 51: 33.3, 52: 32.3, 53: 31.4, 54: 30.5,
-    55: 29.6, 56: 28.7, 57: 27.9, 58: 27.0, 59: 26.1,
-    60: 25.2, 61: 24.4, 62: 23.5, 63: 22.7, 64: 21.8,
-    65: 21.0, 66: 20.2, 67: 19.4, 68: 18.6, 69: 17.8,
+    50: 34.2,
+    51: 33.3,
+    52: 32.3,
+    53: 31.4,
+    54: 30.5,
+    55: 29.6,
+    56: 28.7,
+    57: 27.9,
+    58: 27.0,
+    59: 26.1,
+    60: 25.2,
+    61: 24.4,
+    62: 23.5,
+    63: 22.7,
+    64: 21.8,
+    65: 21.0,
+    66: 20.2,
+    67: 19.4,
+    68: 18.6,
+    69: 17.8,
     70: 17.0,
 }
 
@@ -218,6 +239,7 @@ def compute_sepp(
 # Rule of 55
 # ---------------------------------------------------------------------------
 
+
 def rule_of_55_eligible(retirement_age: int) -> bool:
     """
     Returns True if the Rule of 55 applies.
@@ -238,6 +260,7 @@ def rule_of_55_available_years(retirement_age: int) -> float:
 # ---------------------------------------------------------------------------
 # Bridge strategy builder
 # ---------------------------------------------------------------------------
+
 
 def build_bridge_strategy(
     inputs: BridgeInput,
@@ -341,23 +364,31 @@ def build_bridge_strategy(
                 )
                 strategy = BridgeMethod.TAXABLE_ONLY
         else:
-            strategy = BridgeMethod.TAXABLE_ONLY if not r55_eligible else BridgeMethod.RULE_OF_55
+            strategy = (
+                BridgeMethod.TAXABLE_ONLY
+                if not r55_eligible
+                else BridgeMethod.RULE_OF_55
+            )
 
-        total = withdrawal_hysa + withdrawal_brokerage + withdrawal_401k + withdrawal_sepp
+        total = (
+            withdrawal_hysa + withdrawal_brokerage + withdrawal_401k + withdrawal_sepp
+        )
         total_taxable_withdrawn += withdrawal_hysa + withdrawal_brokerage
         total_401k_withdrawn += withdrawal_401k + withdrawal_sepp
 
-        bridge_years.append(BridgeYear(
-            calendar_year=cal_year,
-            age=age,
-            withdrawal_hysa=withdrawal_hysa,
-            withdrawal_brokerage=withdrawal_brokerage,
-            withdrawal_401k_rule55=withdrawal_401k,
-            withdrawal_sepp=withdrawal_sepp,
-            total_income=total,
-            strategy_used=strategy,
-            notes=notes,
-        ))
+        bridge_years.append(
+            BridgeYear(
+                calendar_year=cal_year,
+                age=age,
+                withdrawal_hysa=withdrawal_hysa,
+                withdrawal_brokerage=withdrawal_brokerage,
+                withdrawal_401k_rule55=withdrawal_401k,
+                withdrawal_sepp=withdrawal_sepp,
+                total_income=total,
+                strategy_used=strategy,
+                notes=notes,
+            )
+        )
 
     # Determine dominant strategy for summary
     if r55_eligible and prefer_rule_of_55:

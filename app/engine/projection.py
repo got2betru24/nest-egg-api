@@ -22,12 +22,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .contribution_limits import AnnualLimits, LimitRow, get_limits
+from .contribution_limits import LimitRow, get_limits
 from .inflation import inflate, build_income_schedule
 from .roth_ladder import LadderState, update_seasoning
 from .social_security import SSBenefitEstimate, annual_benefit_in_year
 from .tax_engine import (
-    BracketRow,
     LTCGThresholds,
     TaxYear,
     TotalTaxResult,
@@ -38,6 +37,7 @@ from .tax_engine import (
 # ---------------------------------------------------------------------------
 # Enums and phase markers
 # ---------------------------------------------------------------------------
+
 
 class ProjectionPhase(str, Enum):
     ACCUMULATION = "accumulation"
@@ -55,9 +55,11 @@ class ReturnScenario(str, Enum):
 # Input structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AccountInputs:
     """Current balances and return assumptions for all accounts."""
+
     hysa_balance: float = 0.0
     brokerage_balance: float = 0.0
     roth_ira_balance: float = 0.0
@@ -88,32 +90,34 @@ class AccountInputs:
     def returns(self, scenario: ReturnScenario) -> dict[str, float]:
         s = scenario.value
         return {
-            "hysa":             getattr(self, f"hysa_return_{s}"),
-            "brokerage":        getattr(self, f"brokerage_return_{s}"),
-            "roth_ira":         getattr(self, f"roth_ira_return_{s}"),
+            "hysa": getattr(self, f"hysa_return_{s}"),
+            "brokerage": getattr(self, f"brokerage_return_{s}"),
+            "roth_ira": getattr(self, f"roth_ira_return_{s}"),
             "traditional_401k": getattr(self, f"traditional_401k_return_{s}"),
-            "roth_401k":        getattr(self, f"roth_401k_return_{s}"),
+            "roth_401k": getattr(self, f"roth_401k_return_{s}"),
         }
 
 
 @dataclass
 class ContributionInputs:
     """Annual contribution amounts (employee only; employer match separate)."""
+
     traditional_401k_annual: float = 0.0
     roth_401k_annual: float = 0.0
     roth_ira_annual: float = 0.0
     employer_match_annual: float = 0.0
     enable_catchup: bool = False
-    solve_mode: str = "fixed"   # 'fixed' | 'solve_for'
+    solve_mode: str = "fixed"  # 'fixed' | 'solve_for'
 
 
 @dataclass
 class PersonInputs:
     """Demographics and SS for one person."""
+
     birth_year: int
     retirement_age: int
-    ss_benefit: SSBenefitEstimate | None    # Pre-computed; None = no SS
-    ss_claim_start_year: int | None         # Calendar year SS begins
+    ss_benefit: SSBenefitEstimate | None  # Pre-computed; None = no SS
+    ss_claim_start_year: int | None  # Calendar year SS begins
     ss_cola_rows: list[dict] = field(default_factory=list)
     assumed_future_ss_cola: float = 0.025
 
@@ -121,13 +125,14 @@ class PersonInputs:
 @dataclass
 class ProjectionInputs:
     """All inputs for a full projection run."""
+
     current_year: int
     primary: PersonInputs
     spouse: PersonInputs | None
 
     accounts: AccountInputs
     contributions: ContributionInputs
-    limit_rows: list[LimitRow]          # From DB for current year
+    limit_rows: list[LimitRow]  # From DB for current year
 
     # Income & lifestyle
     desired_retirement_income_today: float
@@ -154,6 +159,7 @@ class ProjectionInputs:
 # ---------------------------------------------------------------------------
 # Output structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class AccountBalances:
@@ -197,6 +203,7 @@ class YearContributions:
 @dataclass
 class ProjectionYear:
     """Full detail for one year of the projection."""
+
     calendar_year: int
     age_primary: int
     age_spouse: int | None
@@ -216,31 +223,33 @@ class ProjectionYear:
     gross_income: float = 0.0
     net_income: float = 0.0
     income_target: float = 0.0
-    income_gap: float = 0.0     # Negative = shortfall
+    income_gap: float = 0.0  # Negative = shortfall
 
     roth_ladder_conversion: float = 0.0
     roth_available_principal: float = 0.0
 
-    is_depleted: bool = False   # True if portfolio ran out
+    is_depleted: bool = False  # True if portfolio ran out
     notes: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ProjectionResult:
     """Full projection output."""
+
     scenario: ReturnScenario
     years: list[ProjectionYear]
-    depletion_year: int | None          # Calendar year portfolio hits zero
+    depletion_year: int | None  # Calendar year portfolio hits zero
     depletion_age: int | None
     final_balance: float
     total_tax_paid: float
     total_ss_received: float
-    success: bool                       # True = portfolio survived to plan_to_age
+    success: bool  # True = portfolio survived to plan_to_age
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_tax_year(tax_years: dict[int, TaxYear], year: int) -> TaxYear:
     """Get TaxYear for a given calendar year, falling back to most recent."""
@@ -262,7 +271,9 @@ def _apply_contributions(
         hysa=balances.hysa,
         brokerage=balances.brokerage,
         roth_ira=balances.roth_ira + contribs.roth_ira,
-        traditional_401k=balances.traditional_401k + contribs.traditional_401k + contribs.employer_match,
+        traditional_401k=balances.traditional_401k
+        + contribs.traditional_401k
+        + contribs.employer_match,
         roth_401k=balances.roth_401k + contribs.roth_401k,
     )
 
@@ -348,6 +359,7 @@ def _withdraw_from_accounts(
 # Main projection engine
 # ---------------------------------------------------------------------------
 
+
 def run_projection(
     inputs: ProjectionInputs,
     scenario: ReturnScenario = ReturnScenario.BASE,
@@ -366,7 +378,9 @@ def run_projection(
     primary = inputs.primary
     spouse = inputs.spouse
 
-    retirement_year = inputs.current_year + (primary.retirement_age - (inputs.current_year - primary.birth_year))
+    retirement_year = inputs.current_year + (
+        primary.retirement_age - (inputs.current_year - primary.birth_year)
+    )
     plan_end_year = primary.birth_year + inputs.plan_to_age
     years_until_retirement = retirement_year - inputs.current_year
     retirement_duration = plan_end_year - retirement_year
@@ -455,7 +469,9 @@ def run_projection(
                 hysa=_grow(balances.hysa, returns["hysa"]),
                 brokerage=_grow(balances.brokerage, returns["brokerage"]),
                 roth_ira=_grow(balances.roth_ira, returns["roth_ira"]),
-                traditional_401k=_grow(balances.traditional_401k, returns["traditional_401k"]),
+                traditional_401k=_grow(
+                    balances.traditional_401k, returns["traditional_401k"]
+                ),
                 roth_401k=_grow(balances.roth_401k, returns["roth_401k"]),
             )
 
@@ -464,7 +480,9 @@ def run_projection(
         # ----------------------------------------------------------------
         else:
             retirement_year_offset = cal_year - retirement_year
-            income_target = income_schedule[min(retirement_year_offset, len(income_schedule) - 1)]
+            income_target = income_schedule[
+                min(retirement_year_offset, len(income_schedule) - 1)
+            ]
 
             # Healthcare cost (pre-Medicare bridge: ages 55–64)
             if age_primary < 65:
@@ -502,6 +520,7 @@ def run_projection(
             if inputs.enable_roth_ladder and balances.traditional_401k > 0:
                 existing_income_estimate = total_ss * 0.85  # rough SS taxable
                 from .roth_ladder import optimal_conversion_amount, execute_conversion
+
                 override_amount = inputs.roth_ladder_overrides.get(cal_year)
                 if override_amount is not None:
                     conv_amount = override_amount
@@ -527,13 +546,16 @@ def run_projection(
                     balances.roth_ira += roth_conversion
                     withdrawals.roth_conversion = roth_conversion
 
-                    from .roth_ladder import ConversionRecord, ConversionStatus
-                    ladder_state.conversions.append(ConversionRecord(
-                        conversion_year=cal_year,
-                        amount=roth_conversion,
-                        tax_cost=conv_result.tax_cost,
-                        available_year=conv_result.available_at_year,
-                    ))
+                    from .roth_ladder import ConversionRecord
+
+                    ladder_state.conversions.append(
+                        ConversionRecord(
+                            conversion_year=cal_year,
+                            amount=roth_conversion,
+                            tax_cost=conv_result.tax_cost,
+                            available_year=conv_result.available_at_year,
+                        )
+                    )
                     notes.append(f"Roth conversion: ${roth_conversion:,.0f}")
 
             # Update ladder seasoning
@@ -544,13 +566,17 @@ def run_projection(
             portfolio_needed = max(0.0, income_target - total_ss)
 
             # Determine withdrawal order
-            order = inputs.withdrawal_order or _default_withdrawal_order(age_primary, phase == ProjectionPhase.BRIDGE)
+            order = inputs.withdrawal_order or _default_withdrawal_order(
+                age_primary, phase == ProjectionPhase.BRIDGE
+            )
 
             balances, withdrawals, remaining_needed = _withdraw_from_accounts(
                 needed=portfolio_needed,
                 balances=balances,
                 order=order,
-                roth_available_principal=roth_available + balances.roth_ira if age_primary >= 60 else roth_available,
+                roth_available_principal=roth_available + balances.roth_ira
+                if age_primary >= 60
+                else roth_available,
             )
             withdrawals.roth_conversion = roth_conversion
 
@@ -562,10 +588,7 @@ def run_projection(
                     depletion_age = age_primary
 
             # Compute taxes
-            ordinary_income = (
-                withdrawals.traditional_401k
-                + roth_conversion
-            )
+            ordinary_income = withdrawals.traditional_401k + roth_conversion
             ltcg_income = withdrawals.brokerage  # Simplified: all brokerage as LTCG
 
             tax_result = compute_total_tax(
@@ -592,11 +615,47 @@ def run_projection(
                 hysa=_grow(balances.hysa, returns["hysa"]),
                 brokerage=_grow(balances.brokerage, returns["brokerage"]),
                 roth_ira=_grow(balances.roth_ira, returns["roth_ira"]),
-                traditional_401k=_grow(balances.traditional_401k, returns["traditional_401k"]),
+                traditional_401k=_grow(
+                    balances.traditional_401k, returns["traditional_401k"]
+                ),
                 roth_401k=_grow(balances.roth_401k, returns["roth_401k"]),
             )
 
-            projection_years.append(ProjectionYear(
+            projection_years.append(
+                ProjectionYear(
+                    calendar_year=cal_year,
+                    age_primary=age_primary,
+                    age_spouse=age_spouse,
+                    phase=phase,
+                    balances_start=balances_start,
+                    balances_end=AccountBalances(
+                        hysa=balances.hysa,
+                        brokerage=balances.brokerage,
+                        roth_ira=balances.roth_ira,
+                        traditional_401k=balances.traditional_401k,
+                        roth_401k=balances.roth_401k,
+                    ),
+                    contributions=contribs,
+                    withdrawals=withdrawals,
+                    ss_primary=ss_primary,
+                    ss_spouse=ss_spouse,
+                    healthcare_cost=healthcare,
+                    tax_result=tax_result,
+                    gross_income=gross_income,
+                    net_income=net_income,
+                    income_target=income_target,
+                    income_gap=net_income - income_target,
+                    roth_ladder_conversion=roth_conversion,
+                    roth_available_principal=roth_available,
+                    is_depleted=is_depleted,
+                    notes=notes,
+                )
+            )
+            continue
+
+        # Accumulation year record
+        projection_years.append(
+            ProjectionYear(
                 calendar_year=cal_year,
                 age_primary=age_primary,
                 age_spouse=age_spouse,
@@ -611,39 +670,9 @@ def run_projection(
                 ),
                 contributions=contribs,
                 withdrawals=withdrawals,
-                ss_primary=ss_primary,
-                ss_spouse=ss_spouse,
-                healthcare_cost=healthcare,
-                tax_result=tax_result,
-                gross_income=gross_income,
-                net_income=net_income,
-                income_target=income_target,
-                income_gap=net_income - income_target,
-                roth_ladder_conversion=roth_conversion,
-                roth_available_principal=roth_available,
-                is_depleted=is_depleted,
                 notes=notes,
-            ))
-            continue
-
-        # Accumulation year record
-        projection_years.append(ProjectionYear(
-            calendar_year=cal_year,
-            age_primary=age_primary,
-            age_spouse=age_spouse,
-            phase=phase,
-            balances_start=balances_start,
-            balances_end=AccountBalances(
-                hysa=balances.hysa,
-                brokerage=balances.brokerage,
-                roth_ira=balances.roth_ira,
-                traditional_401k=balances.traditional_401k,
-                roth_401k=balances.roth_401k,
-            ),
-            contributions=contribs,
-            withdrawals=withdrawals,
-            notes=notes,
-        ))
+            )
+        )
 
     final_balance = balances.total
 

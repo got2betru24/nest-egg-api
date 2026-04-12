@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ..database import execute, executemany, fetchall, fetchone
-from ..models import ProjectionRequest, ProjectionResultOut, ProjectionYearOut
+from ..models import ProjectionRequest, ProjectionResultOut
 from ..utils import current_year
 from ..engine.projection import (
     AccountInputs,
@@ -18,10 +18,13 @@ from ..engine.projection import (
     ReturnScenario,
     run_projection,
 )
-from ..engine.tax_engine import BracketRow, LTCGThresholds, TaxYear
+from ..engine.tax_engine import BracketRow, TaxYear
 from ..engine.contribution_limits import LimitRow
 from ..engine.social_security import (
-    EarningsRecord, BendPointRow, AWIRow, FRARule,
+    EarningsRecord,
+    BendPointRow,
+    AWIRow,
+    FRARule,
     estimate_benefit,
 )
 
@@ -53,15 +56,14 @@ async def run_projection_endpoint(body: ProjectionRequest):
 
 @router.delete("/{scenario_id}/cache")
 async def invalidate_cache(scenario_id: int):
-    await execute(
-        "DELETE FROM projection_cache WHERE scenario_id = %s", (scenario_id,)
-    )
+    await execute("DELETE FROM projection_cache WHERE scenario_id = %s", (scenario_id,))
     return {"message": "Cache invalidated."}
 
 
 # ---------------------------------------------------------------------------
 # Build engine inputs from DB
 # ---------------------------------------------------------------------------
+
 
 async def _build_projection_inputs(
     scenario_id: int,
@@ -71,7 +73,9 @@ async def _build_projection_inputs(
         "SELECT * FROM scenario_assumptions WHERE scenario_id = %s", (scenario_id,)
     )
     if not assumptions:
-        raise HTTPException(status_code=422, detail="Scenario assumptions not configured")
+        raise HTTPException(
+            status_code=422, detail="Scenario assumptions not configured"
+        )
 
     persons = await fetchall(
         "SELECT * FROM persons WHERE scenario_id = %s", (scenario_id,)
@@ -136,40 +140,77 @@ async def _build_projection_inputs(
     roth_ira_contrib = get_contrib(roth_ira["id"]) if roth_ira.get("id") else None
 
     contribution_inputs = ContributionInputs(
-        traditional_401k_annual=trad_401k_contrib["annual_amount"] if trad_401k_contrib else 0,
+        traditional_401k_annual=trad_401k_contrib["annual_amount"]
+        if trad_401k_contrib
+        else 0,
         roth_401k_annual=roth_401k_contrib["annual_amount"] if roth_401k_contrib else 0,
         roth_ira_annual=roth_ira_contrib["annual_amount"] if roth_ira_contrib else 0,
-        employer_match_annual=trad_401k_contrib["employer_match_amount"] if trad_401k_contrib else 0,
+        employer_match_annual=trad_401k_contrib["employer_match_amount"]
+        if trad_401k_contrib
+        else 0,
         enable_catchup=bool(assumptions["enable_catchup_contributions"]),
     )
 
-    # IRS limits for current year
+    # Resolve the best available tax year — fall back to the most recent
+    # seeded year if the current calendar year isn't in the DB yet.
+    effective_year_row = await fetchone(
+        "SELECT MAX(tax_year) AS yr FROM contribution_limits"
+    )
+    effective_year: int = (
+        effective_year_row["yr"]
+        if effective_year_row and effective_year_row["yr"]
+        else current_year()
+    )
+
+    # IRS contribution limits
     limit_rows_raw = await fetchall(
         "SELECT account_type, limit_type, amount, catchup_age "
         "FROM contribution_limits WHERE tax_year = %s",
-        (current_year(),),
+        (effective_year,),
     )
     limit_rows = [LimitRow(**r) for r in limit_rows_raw]
 
-    # Tax data
+    # Tax brackets — use same effective year, fallback already mirrors tax.py
     tax_brackets_raw = await fetchall(
         "SELECT rate, income_min, income_max FROM tax_brackets "
         "WHERE tax_year = %s AND filing_status = %s",
-        (current_year(), "married_filing_jointly"),
+        (effective_year, "married_filing_jointly"),
     )
+    if not tax_brackets_raw:
+        # tax_brackets may be seeded for a different year than contribution_limits
+        latest_bracket_row = await fetchone(
+            "SELECT MAX(tax_year) AS yr FROM tax_brackets "
+            "WHERE filing_status = 'married_filing_jointly'"
+        )
+        bracket_year: int = (
+            latest_bracket_row["yr"]
+            if latest_bracket_row and latest_bracket_row["yr"]
+            else effective_year
+        )
+        tax_brackets_raw = await fetchall(
+            "SELECT rate, income_min, income_max FROM tax_brackets "
+            "WHERE tax_year = %s AND filing_status = %s",
+            (bracket_year, "married_filing_jointly"),
+        )
+    else:
+        bracket_year = effective_year
+
     std_deduction_row = await fetchone(
         "SELECT amount FROM standard_deductions WHERE tax_year = %s AND filing_status = %s",
-        (current_year(), "married_filing_jointly"),
+        (bracket_year, "married_filing_jointly"),
     )
     std_deduction = std_deduction_row["amount"] if std_deduction_row else 30000.0
 
     tax_year_obj = TaxYear(
-        year=current_year(),
-        brackets=[BracketRow(
-            rate=r["rate"],
-            income_min=r["income_min"],
-            income_max=r["income_max"],
-        ) for r in tax_brackets_raw],
+        year=bracket_year,
+        brackets=[
+            BracketRow(
+                rate=r["rate"],
+                income_min=r["income_min"],
+                income_max=r["income_max"],
+            )
+            for r in tax_brackets_raw
+        ],
         standard_deduction=std_deduction,
     )
 
@@ -182,7 +223,9 @@ async def _build_projection_inputs(
 
     # SS for primary
     primary_ss = await _build_ss_person_inputs(primary_row, assumptions)
-    spouse_ss = await _build_ss_person_inputs(spouse_row, assumptions) if spouse_row else None
+    spouse_ss = (
+        await _build_ss_person_inputs(spouse_row, assumptions) if spouse_row else None
+    )
 
     return ProjectionInputs(
         current_year=current_year(),
@@ -204,6 +247,7 @@ async def _build_projection_inputs(
 
 async def _build_ss_person_inputs(person_row: dict, assumptions: dict) -> PersonInputs:
     from ..engine.projection import PersonInputs as PI
+
     person_id = person_row["id"]
 
     claiming = await fetchone(
@@ -220,14 +264,19 @@ async def _build_ss_person_inputs(person_row: dict, assumptions: dict) -> Person
     earnings_rows = await fetchall(
         "SELECT earn_year, earnings FROM ss_earnings WHERE person_id = %s", (person_id,)
     )
-    earnings = [EarningsRecord(year=r["earn_year"], earnings=r["earnings"]) for r in earnings_rows]
+    earnings = [
+        EarningsRecord(year=r["earn_year"], earnings=r["earnings"])
+        for r in earnings_rows
+    ]
 
     benefit_year = person_row["birth_year"] + 62
     bend_row = await fetchone(
         "SELECT * FROM ss_bend_points WHERE benefit_year <= %s ORDER BY benefit_year DESC LIMIT 1",
         (benefit_year,),
     )
-    awi_rows = await fetchall("SELECT awi_year, awi_value FROM ss_awi ORDER BY awi_year")
+    awi_rows = await fetchall(
+        "SELECT awi_year, awi_value FROM ss_awi ORDER BY awi_year"
+    )
     fra_rows = await fetchall("SELECT * FROM ss_fra")
 
     ss_benefit = estimate_benefit(
@@ -235,29 +284,51 @@ async def _build_ss_person_inputs(person_row: dict, assumptions: dict) -> Person
         claim_age_years=claiming["claim_age_years"],
         claim_age_months=claiming["claim_age_months"],
         earnings_records=earnings,
-        awi_rows=[AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows],
-        bend_point_row=BendPointRow(**{k: bend_row[k] for k in [
-            "benefit_year", "bend_point_1", "bend_point_2",
-            "factor_below_1", "factor_1_to_2", "factor_above_2"
-        ]}),
-        fra_rules=[FRARule(**{k: r[k] for k in [
-            "birth_year_min", "birth_year_max", "fra_years", "fra_months"
-        ]}) for r in fra_rows],
+        awi_rows=[
+            AWIRow(year=r["awi_year"], awi_value=r["awi_value"]) for r in awi_rows
+        ],
+        bend_point_row=BendPointRow(
+            **{
+                k: bend_row[k]
+                for k in [
+                    "benefit_year",
+                    "bend_point_1",
+                    "bend_point_2",
+                    "factor_below_1",
+                    "factor_1_to_2",
+                    "factor_above_2",
+                ]
+            }
+        ),
+        fra_rules=[
+            FRARule(
+                **{
+                    k: r[k]
+                    for k in [
+                        "birth_year_min",
+                        "birth_year_max",
+                        "fra_years",
+                        "fra_months",
+                    ]
+                }
+            )
+            for r in fra_rows
+        ],
         assumed_future_income=assumptions["current_income"],
         current_age=current_year() - person_row["birth_year"],
         retirement_age=person_row["planned_retirement_age"],
     )
 
-    cola_rows = await fetchall(
-        "SELECT cola_year, rate FROM ss_cola ORDER BY cola_year"
-    )
+    cola_rows = await fetchall("SELECT cola_year, rate FROM ss_cola ORDER BY cola_year")
 
     return PI(
         birth_year=person_row["birth_year"],
         retirement_age=person_row["planned_retirement_age"],
         ss_benefit=ss_benefit,
         ss_claim_start_year=person_row["birth_year"] + claiming["claim_age_years"],
-        ss_cola_rows=[{"cola_year": r["cola_year"], "rate": r["rate"]} for r in cola_rows],
+        ss_cola_rows=[
+            {"cola_year": r["cola_year"], "rate": r["rate"]} for r in cola_rows
+        ],
     )
 
 
@@ -265,7 +336,10 @@ async def _build_ss_person_inputs(person_row: dict, assumptions: dict) -> Person
 # Cache helpers
 # ---------------------------------------------------------------------------
 
-async def _load_cache(scenario_id: int, return_scenario: str) -> ProjectionResultOut | None:
+
+async def _load_cache(
+    scenario_id: int, return_scenario: str
+) -> ProjectionResultOut | None:
     rows = await fetchall(
         "SELECT * FROM projection_cache WHERE scenario_id = %s AND return_scenario = %s "
         "ORDER BY plan_year",
@@ -275,7 +349,7 @@ async def _load_cache(scenario_id: int, return_scenario: str) -> ProjectionResul
         return None
     # Build minimal result from cache rows
     # (Full rebuilding — cache is mainly for repeated reads, not complex reconstruction)
-    return None   # Simplified: always recompute for now; extend in v2
+    return None  # Simplified: always recompute for now; extend in v2
 
 
 async def _save_cache(scenario_id: int, return_scenario: str, result) -> None:
@@ -286,25 +360,38 @@ async def _save_cache(scenario_id: int, return_scenario: str, result) -> None:
     )
     rows = []
     for yr in result.years:
-        rows.append((
-            scenario_id, return_scenario, yr.calendar_year,
-            yr.age_primary, yr.age_spouse,
-            yr.balances_end.hysa, yr.balances_end.brokerage,
-            yr.balances_end.roth_ira, yr.balances_end.traditional_401k,
-            yr.balances_end.roth_401k,
-            yr.balances_end.total_pretax, yr.balances_end.total_posttax,
-            yr.balances_end.total,
-            yr.gross_income,
-            yr.ss_primary, yr.ss_spouse,
-            yr.tax_result.ordinary.taxable_income if yr.tax_result else 0,
-            yr.tax_result.total_tax if yr.tax_result else 0,
-            yr.tax_result.total_effective_rate if yr.tax_result else 0,
-            yr.withdrawals.hysa, yr.withdrawals.brokerage,
-            yr.withdrawals.roth_ira, yr.withdrawals.traditional_401k,
-            yr.withdrawals.roth_401k, yr.withdrawals.roth_conversion,
-            yr.contributions.traditional_401k, yr.contributions.roth_401k,
-            yr.contributions.roth_ira,
-        ))
+        rows.append(
+            (
+                scenario_id,
+                return_scenario,
+                yr.calendar_year,
+                yr.age_primary,
+                yr.age_spouse,
+                yr.balances_end.hysa,
+                yr.balances_end.brokerage,
+                yr.balances_end.roth_ira,
+                yr.balances_end.traditional_401k,
+                yr.balances_end.roth_401k,
+                yr.balances_end.total_pretax,
+                yr.balances_end.total_posttax,
+                yr.balances_end.total,
+                yr.gross_income,
+                yr.ss_primary,
+                yr.ss_spouse,
+                yr.tax_result.ordinary.taxable_income if yr.tax_result else 0,
+                yr.tax_result.total_tax if yr.tax_result else 0,
+                yr.tax_result.total_effective_rate if yr.tax_result else 0,
+                yr.withdrawals.hysa,
+                yr.withdrawals.brokerage,
+                yr.withdrawals.roth_ira,
+                yr.withdrawals.traditional_401k,
+                yr.withdrawals.roth_401k,
+                yr.withdrawals.roth_conversion,
+                yr.contributions.traditional_401k,
+                yr.contributions.roth_401k,
+                yr.contributions.roth_ira,
+            )
+        )
 
     if rows:
         await executemany(
@@ -327,6 +414,7 @@ async def _save_cache(scenario_id: int, return_scenario: str, result) -> None:
 # Result serialization
 # ---------------------------------------------------------------------------
 
+
 def _result_to_out(scenario_id: int, return_scenario, result) -> ProjectionResultOut:
     years_out = []
     for yr in result.years:
@@ -346,40 +434,42 @@ def _result_to_out(scenario_id: int, return_scenario, result) -> ProjectionResul
                 "total_effective_rate": t.total_effective_rate,
             }
 
-        years_out.append({
-            "calendar_year": yr.calendar_year,
-            "age_primary": yr.age_primary,
-            "age_spouse": yr.age_spouse,
-            "phase": yr.phase.value,
-            "balances_start": _bal_to_dict(yr.balances_start),
-            "balances_end": _bal_to_dict(yr.balances_end),
-            "contributions": {
-                "traditional_401k": yr.contributions.traditional_401k,
-                "roth_401k": yr.contributions.roth_401k,
-                "roth_ira": yr.contributions.roth_ira,
-                "employer_match": yr.contributions.employer_match,
-            },
-            "withdrawals": {
-                "hysa": yr.withdrawals.hysa,
-                "brokerage": yr.withdrawals.brokerage,
-                "roth_ira": yr.withdrawals.roth_ira,
-                "traditional_401k": yr.withdrawals.traditional_401k,
-                "roth_401k": yr.withdrawals.roth_401k,
-                "roth_conversion": yr.withdrawals.roth_conversion,
-            },
-            "ss_primary": yr.ss_primary,
-            "ss_spouse": yr.ss_spouse,
-            "healthcare_cost": yr.healthcare_cost,
-            "tax": tax_out,
-            "gross_income": yr.gross_income,
-            "net_income": yr.net_income,
-            "income_target": yr.income_target,
-            "income_gap": yr.income_gap,
-            "roth_ladder_conversion": yr.roth_ladder_conversion,
-            "roth_available_principal": yr.roth_available_principal,
-            "is_depleted": yr.is_depleted,
-            "notes": yr.notes,
-        })
+        years_out.append(
+            {
+                "calendar_year": yr.calendar_year,
+                "age_primary": yr.age_primary,
+                "age_spouse": yr.age_spouse,
+                "phase": yr.phase.value,
+                "balances_start": _bal_to_dict(yr.balances_start),
+                "balances_end": _bal_to_dict(yr.balances_end),
+                "contributions": {
+                    "traditional_401k": yr.contributions.traditional_401k,
+                    "roth_401k": yr.contributions.roth_401k,
+                    "roth_ira": yr.contributions.roth_ira,
+                    "employer_match": yr.contributions.employer_match,
+                },
+                "withdrawals": {
+                    "hysa": yr.withdrawals.hysa,
+                    "brokerage": yr.withdrawals.brokerage,
+                    "roth_ira": yr.withdrawals.roth_ira,
+                    "traditional_401k": yr.withdrawals.traditional_401k,
+                    "roth_401k": yr.withdrawals.roth_401k,
+                    "roth_conversion": yr.withdrawals.roth_conversion,
+                },
+                "ss_primary": yr.ss_primary,
+                "ss_spouse": yr.ss_spouse,
+                "healthcare_cost": yr.healthcare_cost,
+                "tax": tax_out,
+                "gross_income": yr.gross_income,
+                "net_income": yr.net_income,
+                "income_target": yr.income_target,
+                "income_gap": yr.income_gap,
+                "roth_ladder_conversion": yr.roth_ladder_conversion,
+                "roth_available_principal": yr.roth_available_principal,
+                "is_depleted": yr.is_depleted,
+                "notes": yr.notes,
+            }
+        )
 
     return {
         "scenario_id": scenario_id,

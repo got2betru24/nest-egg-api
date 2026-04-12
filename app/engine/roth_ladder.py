@@ -34,19 +34,21 @@ from .tax_engine import (
 # Data containers
 # ---------------------------------------------------------------------------
 
+
 class ConversionStatus(str, Enum):
-    SEASONING = "seasoning"         # Within 5-year window (under 59½ only)
-    AVAILABLE = "available"         # Past 5-year window OR age 59½+
-    FUTURE = "future"               # Not yet converted
+    SEASONING = "seasoning"  # Within 5-year window (under 59½ only)
+    AVAILABLE = "available"  # Past 5-year window OR age 59½+
+    FUTURE = "future"  # Not yet converted
 
 
 @dataclass
 class ConversionRecord:
     """Tracks one year's Roth conversion and its seasoning status."""
+
     conversion_year: int
     amount: float
     tax_cost: float
-    available_year: int             # Year the converted principal becomes accessible
+    available_year: int  # Year the converted principal becomes accessible
     status: ConversionStatus = ConversionStatus.SEASONING
 
 
@@ -56,6 +58,7 @@ class LadderState:
     Full state of the Roth conversion ladder at any point in time.
     Maintained year over year by the projection engine.
     """
+
     conversions: list[ConversionRecord] = field(default_factory=list)
 
     def available_principal(self, current_year: int, age: float) -> float:
@@ -63,8 +66,7 @@ class LadderState:
         if age >= 59.5:
             return sum(c.amount for c in self.conversions)
         return sum(
-            c.amount for c in self.conversions
-            if c.available_year <= current_year
+            c.amount for c in self.conversions if c.available_year <= current_year
         )
 
     def seasoning_principal(self, current_year: int, age: float) -> float:
@@ -72,8 +74,7 @@ class LadderState:
         if age >= 59.5:
             return 0.0
         return sum(
-            c.amount for c in self.conversions
-            if c.available_year > current_year
+            c.amount for c in self.conversions if c.available_year > current_year
         )
 
     def total_converted(self) -> float:
@@ -83,21 +84,23 @@ class LadderState:
 @dataclass
 class ConversionYearResult:
     """Result of planning one year's conversion."""
+
     year: int
     age: int
-    existing_income: float              # Income before conversion
-    conversion_amount: float            # Amount converted this year
-    tax_cost: float                     # Incremental tax from conversion
-    marginal_rate_used: float           # Rate at which conversion was taxed
-    bracket_ceiling_used: float         # Target bracket rate (optimizer)
-    room_used: float                    # How much bracket room was consumed
-    available_at_year: int              # Year converted principal is accessible
+    existing_income: float  # Income before conversion
+    conversion_amount: float  # Amount converted this year
+    tax_cost: float  # Incremental tax from conversion
+    marginal_rate_used: float  # Rate at which conversion was taxed
+    bracket_ceiling_used: float  # Target bracket rate (optimizer)
+    room_used: float  # How much bracket room was consumed
+    available_at_year: int  # Year converted principal is accessible
     note: str = ""
 
 
 @dataclass
 class LadderSchedule:
     """Full multi-year Roth conversion ladder plan."""
+
     conversion_years: list[ConversionYearResult]
     total_converted: float
     total_tax_cost: float
@@ -109,11 +112,12 @@ class LadderSchedule:
 # Optimizer: how much to convert in a given year
 # ---------------------------------------------------------------------------
 
+
 def optimal_conversion_amount(
     existing_income: float,
     traditional_balance: float,
     tax_year: TaxYear,
-    target_bracket_ceiling: float = 0.22,   # Don't spill into brackets above this
+    target_bracket_ceiling: float = 0.22,  # Don't spill into brackets above this
     max_conversion: float | None = None,
 ) -> float:
     """
@@ -163,6 +167,7 @@ def optimal_conversion_amount(
 # Single year conversion execution
 # ---------------------------------------------------------------------------
 
+
 def execute_conversion(
     year: int,
     age: int,
@@ -202,7 +207,7 @@ def execute_conversion(
 
     tax_cost = roth_conversion_tax_cost(actual_amount, existing_income, tax_year)
     fill = bracket_fill_at(existing_income, tax_year)
-    available_year = year + 5   # 5-year seasoning rule (irrelevant after 59½)
+    available_year = year + 5  # 5-year seasoning rule (irrelevant after 59½)
 
     return ConversionYearResult(
         year=year,
@@ -226,14 +231,15 @@ def execute_conversion(
 # Multi-year ladder schedule builder
 # ---------------------------------------------------------------------------
 
+
 def build_ladder_schedule(
     retirement_year: int,
     retirement_age: int,
-    ss_start_year: int,                      # Year SS income begins (reduces room)
+    ss_start_year: int,  # Year SS income begins (reduces room)
     traditional_balance_at_retirement: float,
-    annual_return: float,                    # For projecting growing balance
-    income_schedule: dict[int, float],       # {year: other_income} during ladder years
-    tax_year_factory: dict[int, TaxYear],    # {year: TaxYear} — caller provides
+    annual_return: float,  # For projecting growing balance
+    income_schedule: dict[int, float],  # {year: other_income} during ladder years
+    tax_year_factory: dict[int, TaxYear],  # {year: TaxYear} — caller provides
     target_bracket_ceiling: float = 0.22,
     max_ladder_years: int = 15,
     user_overrides: dict[int, float] | None = None,  # {year: amount} manual overrides
@@ -306,17 +312,19 @@ def build_ladder_schedule(
         if result.conversion_amount > 0:
             balance -= result.conversion_amount
             # Grow remaining balance for next year
-            balance *= (1 + annual_return)
+            balance *= 1 + annual_return
 
-            ladder_state.conversions.append(ConversionRecord(
-                conversion_year=cal_year,
-                amount=result.conversion_amount,
-                tax_cost=result.tax_cost,
-                available_year=result.available_at_year,
-                status=ConversionStatus.SEASONING,
-            ))
+            ladder_state.conversions.append(
+                ConversionRecord(
+                    conversion_year=cal_year,
+                    amount=result.conversion_amount,
+                    tax_cost=result.tax_cost,
+                    available_year=result.available_at_year,
+                    status=ConversionStatus.SEASONING,
+                )
+            )
         else:
-            balance *= (1 + annual_return)
+            balance *= 1 + annual_return
 
         results.append(result)
 
@@ -336,6 +344,7 @@ def build_ladder_schedule(
 # ---------------------------------------------------------------------------
 # Seasoning status updater (called each projection year)
 # ---------------------------------------------------------------------------
+
 
 def update_seasoning(
     ladder_state: LadderState,
