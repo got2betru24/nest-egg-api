@@ -134,20 +134,20 @@ async def _build_projection_inputs(
         roth_401k_return_optimistic=roth_401k.get("return_optimistic", 0.10),
     )
 
-    # Contributions (from 401k account)
+    # Contributions — all five account types
     trad_401k_contrib = get_contrib(trad_401k["id"]) if trad_401k.get("id") else None
     roth_401k_contrib = get_contrib(roth_401k["id"]) if roth_401k.get("id") else None
-    roth_ira_contrib = get_contrib(roth_ira["id"]) if roth_ira.get("id") else None
+    roth_ira_contrib  = get_contrib(roth_ira["id"])  if roth_ira.get("id")  else None
+    hysa_contrib      = get_contrib(hysa["id"])      if hysa.get("id")      else None
+    brokerage_contrib = get_contrib(brokerage["id"]) if brokerage.get("id") else None
 
     contribution_inputs = ContributionInputs(
-        traditional_401k_annual=trad_401k_contrib["annual_amount"]
-        if trad_401k_contrib
-        else 0,
+        traditional_401k_annual=trad_401k_contrib["annual_amount"] if trad_401k_contrib else 0,
         roth_401k_annual=roth_401k_contrib["annual_amount"] if roth_401k_contrib else 0,
         roth_ira_annual=roth_ira_contrib["annual_amount"] if roth_ira_contrib else 0,
-        employer_match_annual=trad_401k_contrib["employer_match_amount"]
-        if trad_401k_contrib
-        else 0,
+        employer_match_annual=trad_401k_contrib["employer_match_amount"] if trad_401k_contrib else 0,
+        hysa_annual=hysa_contrib["annual_amount"] if hysa_contrib else 0,
+        brokerage_annual=brokerage_contrib["annual_amount"] if brokerage_contrib else 0,
         enable_catchup=bool(assumptions["enable_catchup_contributions"]),
     )
 
@@ -304,12 +304,7 @@ async def _build_ss_person_inputs(person_row: dict, assumptions: dict) -> Person
             FRARule(
                 **{
                     k: r[k]
-                    for k in [
-                        "birth_year_min",
-                        "birth_year_max",
-                        "fra_years",
-                        "fra_months",
-                    ]
+                    for k in ["birth_year_min", "birth_year_max", "fra_years", "fra_months"]
                 }
             )
             for r in fra_rows
@@ -347,13 +342,10 @@ async def _load_cache(
     )
     if not rows:
         return None
-    # Build minimal result from cache rows
-    # (Full rebuilding — cache is mainly for repeated reads, not complex reconstruction)
     return None  # Simplified: always recompute for now; extend in v2
 
 
 async def _save_cache(scenario_id: int, return_scenario: str, result) -> None:
-    # Clear existing cache for this scenario/scenario
     await execute(
         "DELETE FROM projection_cache WHERE scenario_id = %s AND return_scenario = %s",
         (scenario_id, return_scenario),

@@ -106,6 +106,8 @@ class ContributionInputs:
     roth_401k_annual: float = 0.0
     roth_ira_annual: float = 0.0
     employer_match_annual: float = 0.0
+    hysa_annual: float = 0.0
+    brokerage_annual: float = 0.0
     enable_catchup: bool = False
     solve_mode: str = "fixed"  # 'fixed' | 'solve_for'
 
@@ -198,6 +200,8 @@ class YearContributions:
     roth_401k: float = 0.0
     roth_ira: float = 0.0
     employer_match: float = 0.0
+    hysa: float = 0.0
+    brokerage: float = 0.0
 
 
 @dataclass
@@ -268,8 +272,8 @@ def _apply_contributions(
     contribs: YearContributions,
 ) -> AccountBalances:
     return AccountBalances(
-        hysa=balances.hysa,
-        brokerage=balances.brokerage,
+        hysa=balances.hysa + contribs.hysa,
+        brokerage=balances.brokerage + contribs.brokerage,
         roth_ira=balances.roth_ira + contribs.roth_ira,
         traditional_401k=balances.traditional_401k
         + contribs.traditional_401k
@@ -461,6 +465,8 @@ def run_projection(
                 roth_401k=roth_401k,
                 roth_ira=roth_ira,
                 employer_match=employer,
+                hysa=c.hysa_annual,
+                brokerage=c.brokerage_annual,
             )
 
             # Apply contributions then grow
