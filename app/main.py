@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import lifespan
-from app.routers import scenarios, projection, optimizer, social_security, tax, inputs
+from app.routers import scenarios, projection, optimizer, social_security, tax, inputs, contribution_planner
 
 
 app = FastAPI(
@@ -42,6 +42,7 @@ app.include_router(scenarios.router, prefix="/v1")
 app.include_router(inputs.router, prefix="/v1")
 app.include_router(projection.router, prefix="/v1")
 app.include_router(optimizer.router, prefix="/v1")
+app.include_router(contribution_planner.router, prefix="/v1")
 app.include_router(social_security.router, prefix="/v1")
 app.include_router(tax.router, prefix="/v1")
 

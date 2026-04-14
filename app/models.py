@@ -404,8 +404,52 @@ class FullScenarioOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Contribution Planner
+# ---------------------------------------------------------------------------
+
+
+class ContributionPlanRequest(BaseModel):
+    scenario_id: int
+    return_scenario: ReturnScenario = ReturnScenario.BASE
+    # Which accounts to include in the solve
+    include_traditional_401k: bool = True
+    include_roth_401k: bool = True
+    include_roth_ira: bool = True
+    include_hysa: bool = True
+    include_brokerage: bool = True
+
+
+class ContributionPlanResultOut(BaseModel):
+    solved: bool
+    traditional_401k_annual: float
+    roth_401k_annual: float
+    roth_ira_annual: float
+    hysa_annual: float
+    brokerage_annual: float
+    employer_match_annual: float
+    total_annual_contribution: float
+    # IRS limits that applied (for UI display)
+    limit_traditional_401k: float
+    limit_roth_401k: float
+    limit_roth_ira: float
+    projection: ProjectionResultOut | None
+    iterations: int
+    notes: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Generic responses
+# ---------------------------------------------------------------------------
+
+
 class MessageResponse(BaseModel):
     message: str
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+    code: str | None = None
 
 
 class ErrorResponse(BaseModel):
