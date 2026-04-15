@@ -10,7 +10,13 @@ from fastapi import APIRouter, HTTPException
 from ..database import fetchall, fetchone
 from ..models import OptimizerRequest, OptimizedStrategyOut
 from ..engine.optimizer import OptimizerConfig, SSClaimingOption, run_optimizer
-from ..engine.social_security import AWIRow, BendPointRow, EarningsRecord, FRARule
+from ..engine.social_security import (
+    AWIRow,
+    BendPointRow,
+    EarningsRecord,
+    FRARule,
+    estimate_benefit,
+)
 from .projection import _build_projection_inputs, _result_to_out
 
 router = APIRouter(prefix="/optimizer", tags=["optimizer"])
@@ -25,7 +31,6 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
         raise HTTPException(status_code=404, detail="Scenario not found")
 
     # Build base projection inputs
-
     base_inputs = await _build_projection_inputs(
         body.scenario_id, body.optimize_against_scenario
     )
@@ -39,7 +44,7 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
     if not primary_row:
         raise HTTPException(status_code=422, detail="Primary person not configured")
 
-    # Load SS data
+    # Load primary SS reference data (bend points keyed to primary's birth year)
     primary_earnings, bend_row, awi_rows, fra_rows = await _load_ss_reference(
         primary_row["id"], primary_row["birth_year"]
     )
@@ -47,15 +52,22 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
     spouse_earnings = None
     spouse_use_spousal = True
     spouse_birth_year = None
+
     if spouse_row:
         spouse_birth_year = spouse_row["birth_year"]
-        ss_claiming = await fetchone(
-            "SELECT use_spousal_benefit FROM ss_claiming WHERE person_id = %s",
-            (spouse_row["id"],),
+
+        # Auto-determine whether the spouse is better off on their own record
+        # or on the spousal benefit (50% of primary PIA at FRA). This mirrors
+        # SSA's actual rule: the higher of the two is used.
+        spouse_use_spousal = await _should_use_spousal_benefit(
+            spouse_row=spouse_row,
+            primary_row=primary_row,
+            primary_earnings=primary_earnings,
+            awi_rows=awi_rows,
+            bend_row=bend_row,
+            fra_rows=fra_rows,
         )
-        spouse_use_spousal = (
-            bool(ss_claiming["use_spousal_benefit"]) if ss_claiming else True
-        )
+
         if not spouse_use_spousal:
             spouse_earnings_rows = await fetchall(
                 "SELECT earn_year, earnings FROM ss_earnings WHERE person_id = %s",
@@ -124,6 +136,101 @@ async def run_optimizer_endpoint(body: OptimizerRequest):
         "rationale": result.rationale,
         "projection": proj_out,
     }
+
+
+# ---------------------------------------------------------------------------
+# Spousal benefit auto-detection
+# ---------------------------------------------------------------------------
+
+
+async def _should_use_spousal_benefit(
+    spouse_row: dict,
+    primary_row: dict,
+    primary_earnings: list[EarningsRecord],
+    awi_rows: list[AWIRow],
+    bend_row: BendPointRow,
+    fra_rows: list[FRARule],
+) -> bool:
+    """
+    Return True if the spouse's FRA spousal benefit (50% of primary PIA)
+    exceeds their own FRA benefit computed from their earnings record.
+    Mirrors SSA's actual determination rule.
+    """
+    # Compute primary's FRA PIA using primary's own bend points (already loaded)
+    primary_fra_est = estimate_benefit(
+        birth_year=primary_row["birth_year"],
+        claim_age_years=67,
+        claim_age_months=0,
+        earnings_records=primary_earnings,
+        awi_rows=awi_rows,
+        bend_point_row=bend_row,
+        fra_rules=fra_rows,
+        assumed_future_income=0.0,
+        current_age=0,
+        retirement_age=67,
+    )
+    spousal_fra_annual = primary_fra_est.pia * 0.50 * 12
+
+    # Compute spouse's own-record FRA benefit using spouse's bend points
+    spouse_earnings_rows = await fetchall(
+        "SELECT earn_year, earnings FROM ss_earnings WHERE person_id = %s",
+        (spouse_row["id"],),
+    )
+    spouse_earnings = [
+        EarningsRecord(year=r["earn_year"], earnings=r["earnings"])
+        for r in spouse_earnings_rows
+    ]
+
+    spouse_benefit_year = spouse_row["birth_year"] + 62
+    spouse_bend_raw = await fetchone(
+        "SELECT * FROM ss_bend_points WHERE benefit_year <= %s "
+        "ORDER BY benefit_year DESC LIMIT 1",
+        (spouse_benefit_year,),
+    )
+    if not spouse_bend_raw:
+        # No bend points for spouse — fall back to spousal
+        return True
+
+    spouse_bend = BendPointRow(
+        **{
+            k: spouse_bend_raw[k]
+            for k in [
+                "benefit_year",
+                "bend_point_1",
+                "bend_point_2",
+                "factor_below_1",
+                "factor_1_to_2",
+                "factor_above_2",
+            ]
+        }
+    )
+    spouse_assumptions = await fetchone(
+        "SELECT current_income FROM scenario_assumptions sa "
+        "JOIN persons p ON p.scenario_id = sa.scenario_id "
+        "WHERE p.id = %s",
+        (spouse_row["id"],),
+    )
+    spouse_own_est = estimate_benefit(
+        birth_year=spouse_row["birth_year"],
+        claim_age_years=67,
+        claim_age_months=0,
+        earnings_records=spouse_earnings,
+        awi_rows=awi_rows,
+        bend_point_row=spouse_bend,
+        fra_rules=fra_rows,
+        assumed_future_income=spouse_assumptions["current_income"]
+        if spouse_assumptions
+        else 0.0,
+        current_age=0,
+        retirement_age=67,
+    )
+
+    return spousal_fra_annual > spouse_own_est.annual_benefit
+
+
+# ---------------------------------------------------------------------------
+# SS reference data loader
+# ---------------------------------------------------------------------------
 
 
 async def _load_ss_reference(person_id: int, birth_year: int):

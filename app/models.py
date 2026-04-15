@@ -242,6 +242,10 @@ class SSClaimingComparisonOut(BaseModel):
     early: SSBenefitEstimateOut
     fra: SSBenefitEstimateOut
     late: SSBenefitEstimateOut
+    # Indicates whether these estimates are based on the person's own earnings
+    # record or the spousal benefit (50% of primary PIA). Determined by
+    # whichever produces the higher FRA benefit — mirrors SSA's actual rule.
+    benefit_basis: str  # "own_record" | "spousal"
 
 
 # ---------------------------------------------------------------------------
@@ -400,11 +404,6 @@ class FullScenarioOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Generic responses
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Contribution Planner
 # ---------------------------------------------------------------------------
 
@@ -445,11 +444,6 @@ class ContributionPlanResultOut(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
-
-
-class ErrorResponse(BaseModel):
-    detail: str
-    code: str | None = None
 
 
 class ErrorResponse(BaseModel):
