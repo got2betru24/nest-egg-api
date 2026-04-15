@@ -155,7 +155,12 @@ class ProjectionInputs:
     roth_ladder_overrides: dict[int, float] = field(default_factory=dict)
 
     # Withdrawal order override (list of account names in draw order)
+    # Only used when withdrawal_strategy == 'static'.
     withdrawal_order: list[str] | None = None
+
+    # 'dynamic' = bracket-aware per-year optimizer (default, spend-maximizing)
+    # 'static'  = legacy fixed waterfall (for regression testing / comparison)
+    withdrawal_strategy: str = "dynamic"
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +289,7 @@ def _apply_contributions(
 
 def _default_withdrawal_order(age: float, has_bridge: bool) -> list[str]:
     """
-    Default tax-efficient withdrawal order.
+    Legacy static withdrawal order — used only when withdrawal_strategy == 'static'.
     During bridge (< 59.5): taxable first, then Rule of 55 / SEPP.
     Post-59.5: taxable → traditional (fills brackets) → Roth (last resort).
     """
@@ -300,14 +305,8 @@ def _withdraw_from_accounts(
     roth_available_principal: float,
 ) -> tuple[AccountBalances, YearWithdrawals, float]:
     """
+    Legacy static waterfall — used only when withdrawal_strategy == 'static'.
     Withdraw `needed` from accounts in the specified order.
-
-    For Roth accounts, only withdraws up to available principal (contributions
-    + seasoned conversions) unless age >= 59.5 (handled by caller setting
-    roth_available_principal = full balance).
-
-    Returns:
-        (updated_balances, withdrawals, remaining_needed)
     """
     w = YearWithdrawals()
     bal = AccountBalances(
@@ -342,8 +341,7 @@ def _withdraw_from_accounts(
             remaining -= take
 
         elif account == "roth_401k":
-            # Available without limit after 59½; otherwise contribution basis only
-            available = bal.roth_401k  # Simplified: full balance (basis tracking in v2)
+            available = bal.roth_401k
             take = min(available, remaining)
             w.roth_401k += take
             bal.roth_401k -= take
@@ -357,6 +355,223 @@ def _withdraw_from_accounts(
             remaining -= take
 
     return bal, w, remaining
+
+
+def _smart_withdraw_and_convert(
+    needed: float,
+    balances: AccountBalances,
+    ss_income: float,
+    tax_year: TaxYear,
+    ltcg_thresholds: LTCGThresholds,
+    roth_available_principal: float,
+    enable_roth_ladder: bool,
+    roth_ladder_target_bracket: float,
+    roth_ladder_override: float | None,
+    traditional_balance: float,
+    ladder_state: LadderState,
+    cal_year: int,
+    age_primary: int,
+    is_bridge: bool,
+) -> tuple[AccountBalances, YearWithdrawals, float, float, list[str]]:
+    """
+    Bracket-aware, spend-maximizing withdrawal and Roth conversion optimizer.
+
+    Jointly decides how much to withdraw from each account AND how much to
+    Roth-convert each year, using shared bracket room optimally.
+
+    Algorithm:
+        1. Compute base ordinary income floor (SS taxable estimate).
+        2. Determine ordinary bracket room up to target ceiling.
+        3. Pull traditional 401k to meet portfolio need, capped at bracket room.
+        4. Place brokerage before traditional when doing so stays in 0% LTCG zone.
+        5. After withdrawal need is met, fill remaining bracket room with
+           Roth conversion (the ladder) — conversions never displace withdrawals.
+        6. Fill any remaining need from zero-cost sources: HYSA first, then Roth.
+        7. Spill into next bracket from traditional only if all else is exhausted.
+
+    Returns:
+        (updated_balances, withdrawals, roth_conversion_amount, remaining_needed, notes)
+    """
+    from .roth_ladder import (
+        ConversionRecord,
+        execute_conversion,
+        optimal_conversion_amount,
+    )
+    from .tax_engine import bracket_fill_at, ss_taxable_amount
+
+    notes: list[str] = []
+    w = YearWithdrawals()
+    bal = AccountBalances(
+        hysa=balances.hysa,
+        brokerage=balances.brokerage,
+        roth_ira=balances.roth_ira,
+        traditional_401k=balances.traditional_401k,
+        roth_401k=balances.roth_401k,
+    )
+    roth_conversion = 0.0
+    remaining = needed
+
+    # ------------------------------------------------------------------
+    # Step 1: Establish income floor — SS taxable portion.
+    # We use the real formula here rather than the 0.85 approximation.
+    # ------------------------------------------------------------------
+    ss_taxable_floor = ss_taxable_amount(
+        ss_gross=ss_income,
+        other_income=0.0,  # Conservative: compute floor with no other income yet
+        filing_status=tax_year.filing_status,
+    )
+    income_on_table = ss_taxable_floor  # grows as we add withdrawals below
+
+    # ------------------------------------------------------------------
+    # Step 2: How much ordinary bracket room do we have before hitting
+    # the Roth ladder's target ceiling?  This is shared between trad
+    # 401k withdrawals and any Roth conversion.
+    # ------------------------------------------------------------------
+    fill = bracket_fill_at(income_on_table, tax_year)
+    at_or_above_ceiling = fill.current_rate >= roth_ladder_target_bracket
+    ordinary_room = fill.current_bracket_remaining if not at_or_above_ceiling else 0.0
+
+    # ------------------------------------------------------------------
+    # Step 3: Brokerage — take it BEFORE traditional when the combined
+    # ordinary + gains income stays within the 0% LTCG zone.
+    # After 59½ only (bridge phase uses taxable-first anyway via is_bridge).
+    # ------------------------------------------------------------------
+    if bal.brokerage > 0 and remaining > 0 and not is_bridge:
+        # How much brokerage can we pull at 0% LTCG?
+        # 0% zone: total taxable income (ordinary + gains) < ltcg_thresholds.zero_max
+        # Ordinary so far is income_on_table. Gains stack on top.
+        ltcg_zero_room = max(
+            0.0,
+            ltcg_thresholds.zero_max
+            - max(0.0, income_on_table - tax_year.standard_deduction),
+        )
+        # Pull up to min(need, brokerage balance, 0% LTCG room)
+        brokerage_at_zero = min(bal.brokerage, remaining, ltcg_zero_room)
+        if brokerage_at_zero > 0:
+            w.brokerage += brokerage_at_zero
+            bal.brokerage -= brokerage_at_zero
+            remaining -= brokerage_at_zero
+            notes.append(
+                f"Brokerage ${brokerage_at_zero:,.0f} at 0% LTCG"
+                if brokerage_at_zero > 0
+                else ""
+            )
+
+    # ------------------------------------------------------------------
+    # Step 4: Traditional 401k — fill up to ordinary bracket room.
+    # This is the "cheap" traditional withdrawal zone.
+    # ------------------------------------------------------------------
+    if bal.traditional_401k > 0 and remaining > 0 and ordinary_room > 0:
+        trad_at_low_rate = min(bal.traditional_401k, remaining, ordinary_room)
+        w.traditional_401k += trad_at_low_rate
+        bal.traditional_401k -= trad_at_low_rate
+        remaining -= trad_at_low_rate
+        income_on_table += trad_at_low_rate
+        ordinary_room -= trad_at_low_rate
+
+    # ------------------------------------------------------------------
+    # Step 5: HYSA — zero tax cost, spend before Roth to preserve
+    # tax-free Roth growth.
+    # ------------------------------------------------------------------
+    if bal.hysa > 0 and remaining > 0:
+        take = min(bal.hysa, remaining)
+        w.hysa += take
+        bal.hysa -= take
+        remaining -= take
+
+    # ------------------------------------------------------------------
+    # Step 6: Roth — last free source before spilling into higher brackets.
+    # ------------------------------------------------------------------
+    if remaining > 0:
+        roth_total_available = (
+            bal.roth_ira + bal.roth_401k
+            if age_primary >= 60
+            else min(roth_available_principal, bal.roth_ira) + bal.roth_401k
+        )
+        if roth_total_available > 0:
+            # Draw from Roth 401k first (often smaller, preserve Roth IRA growth)
+            take_401k = min(bal.roth_401k, remaining)
+            w.roth_401k += take_401k
+            bal.roth_401k -= take_401k
+            remaining -= take_401k
+
+            if remaining > 0:
+                ira_available = (
+                    bal.roth_ira
+                    if age_primary >= 60
+                    else min(roth_available_principal, bal.roth_ira)
+                )
+                take_ira = min(ira_available, remaining)
+                w.roth_ira += take_ira
+                bal.roth_ira -= take_ira
+                remaining -= take_ira
+
+    # ------------------------------------------------------------------
+    # Step 7: Spill — if still short, pull more traditional (higher bracket)
+    # and any remaining brokerage at 15%+ LTCG.
+    # ------------------------------------------------------------------
+    if remaining > 0 and bal.traditional_401k > 0:
+        take = min(bal.traditional_401k, remaining)
+        w.traditional_401k += take
+        bal.traditional_401k -= take
+        remaining -= take
+        income_on_table += take
+        notes.append(f"Bracket spill: ${take:,.0f} trad 401k at higher rate")
+
+    if remaining > 0 and bal.brokerage > 0:
+        take = min(bal.brokerage, remaining)
+        w.brokerage += take
+        bal.brokerage -= take
+        remaining -= take
+
+    # ------------------------------------------------------------------
+    # Step 8: Roth conversion — use any remaining bracket room AFTER
+    # withdrawals are fully resolved. Conversions never displace income
+    # needs; they only use leftover room.
+    # ------------------------------------------------------------------
+    if enable_roth_ladder and bal.traditional_401k > 0:
+        # Recompute bracket position now that withdrawals have consumed room
+        fill_post = bracket_fill_at(income_on_table, tax_year)
+        remaining_ordinary_room = (
+            fill_post.current_bracket_remaining
+            if fill_post.current_rate < roth_ladder_target_bracket
+            else 0.0
+        )
+
+        if roth_ladder_override is not None:
+            conv_amount = roth_ladder_override
+        else:
+            conv_amount = optimal_conversion_amount(
+                existing_income=income_on_table,
+                traditional_balance=bal.traditional_401k,
+                tax_year=tax_year,
+                target_bracket_ceiling=roth_ladder_target_bracket,
+            )
+
+        if conv_amount > 0:
+            conv_result = execute_conversion(
+                year=cal_year,
+                age=age_primary,
+                existing_income=income_on_table,
+                amount=conv_amount,
+                traditional_balance=bal.traditional_401k,
+                tax_year=tax_year,
+            )
+            roth_conversion = conv_result.conversion_amount
+            bal.traditional_401k -= roth_conversion
+            bal.roth_ira += roth_conversion
+            w.roth_conversion = roth_conversion
+            ladder_state.conversions.append(
+                ConversionRecord(
+                    conversion_year=cal_year,
+                    amount=roth_conversion,
+                    tax_cost=conv_result.tax_cost,
+                    available_year=conv_result.available_at_year,
+                )
+            )
+            notes.append(f"Roth conversion: ${roth_conversion:,.0f} (leftover bracket room)")
+
+    return bal, w, roth_conversion, remaining, notes
 
 
 # ---------------------------------------------------------------------------
@@ -522,48 +737,6 @@ def run_projection(
             total_ss = ss_primary + ss_spouse
             total_ss_received += total_ss
 
-            # Roth ladder: convert during low-income years
-            if inputs.enable_roth_ladder and balances.traditional_401k > 0:
-                existing_income_estimate = total_ss * 0.85  # rough SS taxable
-                from .roth_ladder import optimal_conversion_amount, execute_conversion
-
-                override_amount = inputs.roth_ladder_overrides.get(cal_year)
-                if override_amount is not None:
-                    conv_amount = override_amount
-                else:
-                    conv_amount = optimal_conversion_amount(
-                        existing_income=existing_income_estimate,
-                        traditional_balance=balances.traditional_401k,
-                        tax_year=tax_year,
-                        target_bracket_ceiling=inputs.roth_ladder_target_bracket,
-                    )
-
-                if conv_amount > 0:
-                    conv_result = execute_conversion(
-                        year=cal_year,
-                        age=age_primary,
-                        existing_income=existing_income_estimate,
-                        amount=conv_amount,
-                        traditional_balance=balances.traditional_401k,
-                        tax_year=tax_year,
-                    )
-                    roth_conversion = conv_result.conversion_amount
-                    balances.traditional_401k -= roth_conversion
-                    balances.roth_ira += roth_conversion
-                    withdrawals.roth_conversion = roth_conversion
-
-                    from .roth_ladder import ConversionRecord
-
-                    ladder_state.conversions.append(
-                        ConversionRecord(
-                            conversion_year=cal_year,
-                            amount=roth_conversion,
-                            tax_cost=conv_result.tax_cost,
-                            available_year=conv_result.available_at_year,
-                        )
-                    )
-                    notes.append(f"Roth conversion: ${roth_conversion:,.0f}")
-
             # Update ladder seasoning
             ladder_state = update_seasoning(ladder_state, cal_year, age_primary)
             roth_available = ladder_state.available_principal(cal_year, age_primary)
@@ -571,20 +744,87 @@ def run_projection(
             # Net income needed from portfolio (after SS)
             portfolio_needed = max(0.0, income_target - total_ss)
 
-            # Determine withdrawal order
-            order = inputs.withdrawal_order or _default_withdrawal_order(
-                age_primary, phase == ProjectionPhase.BRIDGE
-            )
+            # ----------------------------------------------------------------
+            # Withdrawal + Roth conversion: dynamic or static strategy
+            # ----------------------------------------------------------------
+            if inputs.withdrawal_strategy == "dynamic":
+                (
+                    balances,
+                    withdrawals,
+                    roth_conversion,
+                    remaining_needed,
+                    smart_notes,
+                ) = _smart_withdraw_and_convert(
+                    needed=portfolio_needed,
+                    balances=balances,
+                    ss_income=total_ss,
+                    tax_year=tax_year,
+                    ltcg_thresholds=inputs.ltcg_thresholds,
+                    roth_available_principal=roth_available + balances.roth_ira
+                    if age_primary >= 60
+                    else roth_available,
+                    enable_roth_ladder=inputs.enable_roth_ladder,
+                    roth_ladder_target_bracket=inputs.roth_ladder_target_bracket,
+                    roth_ladder_override=inputs.roth_ladder_overrides.get(cal_year),
+                    traditional_balance=balances.traditional_401k,
+                    ladder_state=ladder_state,
+                    cal_year=cal_year,
+                    age_primary=age_primary,
+                    is_bridge=(phase == ProjectionPhase.BRIDGE),
+                )
+                notes.extend(n for n in smart_notes if n)
+            else:
+                # Legacy static path — preserved for regression testing
+                if inputs.enable_roth_ladder and balances.traditional_401k > 0:
+                    existing_income_estimate = total_ss * 0.85
+                    from .roth_ladder import optimal_conversion_amount, execute_conversion, ConversionRecord
 
-            balances, withdrawals, remaining_needed = _withdraw_from_accounts(
-                needed=portfolio_needed,
-                balances=balances,
-                order=order,
-                roth_available_principal=roth_available + balances.roth_ira
-                if age_primary >= 60
-                else roth_available,
-            )
-            withdrawals.roth_conversion = roth_conversion
+                    override_amount = inputs.roth_ladder_overrides.get(cal_year)
+                    if override_amount is not None:
+                        conv_amount = override_amount
+                    else:
+                        conv_amount = optimal_conversion_amount(
+                            existing_income=existing_income_estimate,
+                            traditional_balance=balances.traditional_401k,
+                            tax_year=tax_year,
+                            target_bracket_ceiling=inputs.roth_ladder_target_bracket,
+                        )
+
+                    if conv_amount > 0:
+                        conv_result = execute_conversion(
+                            year=cal_year,
+                            age=age_primary,
+                            existing_income=existing_income_estimate,
+                            amount=conv_amount,
+                            traditional_balance=balances.traditional_401k,
+                            tax_year=tax_year,
+                        )
+                        roth_conversion = conv_result.conversion_amount
+                        balances.traditional_401k -= roth_conversion
+                        balances.roth_ira += roth_conversion
+                        withdrawals.roth_conversion = roth_conversion
+                        ladder_state.conversions.append(
+                            ConversionRecord(
+                                conversion_year=cal_year,
+                                amount=roth_conversion,
+                                tax_cost=conv_result.tax_cost,
+                                available_year=conv_result.available_at_year,
+                            )
+                        )
+                        notes.append(f"Roth conversion: ${roth_conversion:,.0f}")
+
+                order = inputs.withdrawal_order or _default_withdrawal_order(
+                    age_primary, phase == ProjectionPhase.BRIDGE
+                )
+                balances, withdrawals, remaining_needed = _withdraw_from_accounts(
+                    needed=portfolio_needed,
+                    balances=balances,
+                    order=order,
+                    roth_available_principal=roth_available + balances.roth_ira
+                    if age_primary >= 60
+                    else roth_available,
+                )
+                withdrawals.roth_conversion = roth_conversion
 
             if remaining_needed > 100:
                 notes.append(f"Income shortfall: ${remaining_needed:,.0f}")
@@ -593,9 +833,9 @@ def run_projection(
                     depletion_year = cal_year
                     depletion_age = age_primary
 
-            # Compute taxes
+            # Compute taxes on actual withdrawals
             ordinary_income = withdrawals.traditional_401k + roth_conversion
-            ltcg_income = withdrawals.brokerage  # Simplified: all brokerage as LTCG
+            ltcg_income = withdrawals.brokerage  # All brokerage treated as LTCG gains
 
             tax_result = compute_total_tax(
                 ordinary_income=ordinary_income,

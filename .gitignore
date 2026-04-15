@@ -18,6 +18,7 @@ venv/
 
 # OS
 .DS_Store
+*.DS_Store
 Thumbs.db
 
 # VS Code dev containers
