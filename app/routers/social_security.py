@@ -183,7 +183,7 @@ async def get_benefit_estimate(
             )
             for r in fra_rows
         ],
-        assumed_future_income=assumptions["current_income"] if assumptions else 0.0,
+        assumed_future_income=assumptions["person_income"] if assumptions else 0.0,
         current_age=current_year() - person["birth_year"],
         retirement_age=person["planned_retirement_age"],
     )
@@ -248,7 +248,7 @@ async def get_claiming_comparison(person_id: int):
         awi_rows=awi_list,
         bend_point_row=bend,
         fra_rules=fra_rules,
-        assumed_future_income=assumptions["current_income"] if assumptions else 0.0,
+        assumed_future_income=assumptions["person_income"] if assumptions else 0.0,
         current_age=current_year() - person["birth_year"],
         retirement_age=person["planned_retirement_age"],
     )
@@ -277,7 +277,8 @@ async def get_claiming_comparison(person_id: int):
             for r in primary_earnings_rows
         ]
         primary_assumptions = await fetchone(
-            "SELECT current_income FROM scenario_assumptions sa "
+            "SELECT sa.current_income AS household_income, p.current_income AS person_income "
+            "FROM scenario_assumptions sa "
             "JOIN persons p ON p.scenario_id = sa.scenario_id "
             "WHERE p.id = %s",
             (primary_row["id"],),
@@ -312,7 +313,7 @@ async def get_claiming_comparison(person_id: int):
                 awi_rows=awi_list,
                 bend_point_row=primary_bend,
                 fra_rules=fra_rules,
-                assumed_future_income=primary_assumptions["current_income"]
+                assumed_future_income=primary_assumptions["person_income"]
                 if primary_assumptions
                 else 0.0,
                 current_age=current_year() - primary_row["birth_year"],
@@ -409,7 +410,8 @@ async def _load_ss_data(person_id: int):
     fra_rows = await fetchall("SELECT * FROM ss_fra")
 
     assumptions = await fetchone(
-        "SELECT current_income FROM scenario_assumptions sa "
+        "SELECT sa.current_income AS household_income, p.current_income AS person_income "
+        "FROM scenario_assumptions sa "
         "JOIN persons p ON p.scenario_id = sa.scenario_id "
         "WHERE p.id = %s",
         (person_id,),

@@ -204,8 +204,12 @@ async def _should_use_spousal_benefit(
             ]
         }
     )
+
+    # FIX: alias both current_income columns to avoid ambiguity now that
+    # persons.current_income and scenario_assumptions.current_income both exist.
     spouse_assumptions = await fetchone(
-        "SELECT current_income FROM scenario_assumptions sa "
+        "SELECT sa.current_income AS household_income, p.current_income AS person_income "
+        "FROM scenario_assumptions sa "
         "JOIN persons p ON p.scenario_id = sa.scenario_id "
         "WHERE p.id = %s",
         (spouse_row["id"],),
@@ -218,7 +222,7 @@ async def _should_use_spousal_benefit(
         awi_rows=awi_rows,
         bend_point_row=spouse_bend,
         fra_rules=fra_rows,
-        assumed_future_income=spouse_assumptions["current_income"]
+        assumed_future_income=spouse_assumptions["person_income"]
         if spouse_assumptions
         else 0.0,
         current_age=0,

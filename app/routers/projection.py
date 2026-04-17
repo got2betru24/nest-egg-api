@@ -236,6 +236,8 @@ async def _build_projection_inputs(
         limit_rows=limit_rows,
         desired_retirement_income_today=assumptions["desired_retirement_income"],
         current_income=assumptions["current_income"],
+        primary_income=primary_row.get("current_income", 0.0),
+        spouse_income=spouse_row.get("current_income", 0.0) if spouse_row else 0.0,
         inflation_rate=assumptions["inflation_rate"],
         plan_to_age=assumptions["plan_to_age"],
         healthcare_annual_cost=assumptions["healthcare_annual_cost"],
@@ -309,7 +311,7 @@ async def _build_ss_person_inputs(person_row: dict, assumptions: dict) -> Person
             )
             for r in fra_rows
         ],
-        assumed_future_income=assumptions["current_income"],
+        assumed_future_income=person_row.get("current_income", 0.0),
         current_age=current_year() - person_row["birth_year"],
         retirement_age=person_row["planned_retirement_age"],
     )

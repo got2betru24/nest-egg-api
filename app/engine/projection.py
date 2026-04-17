@@ -138,7 +138,9 @@ class ProjectionInputs:
 
     # Income & lifestyle
     desired_retirement_income_today: float
-    current_income: float
+    current_income: float          # Combined household income (legacy; kept for contribution planner)
+    primary_income: float = 0.0   # Primary's individual earned income (SS projection)
+    spouse_income: float = 0.0    # Spouse's individual earned income (SS projection)
     inflation_rate: float = 0.03
     plan_to_age: int = 90
     healthcare_annual_cost: float = 0.0  # Pre-Medicare bridge cost

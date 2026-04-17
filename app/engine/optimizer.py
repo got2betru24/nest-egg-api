@@ -324,7 +324,7 @@ def run_optimizer(
             awi_rows=awi_rows,
             bend_point_row=bend_point_row,
             fra_rules=fra_rules,
-            assumed_future_income=base_inputs.current_income,
+            assumed_future_income=base_inputs.primary_income,
             current_age=base_inputs.current_year - primary_birth_year,
             retirement_age=base_inputs.primary.retirement_age,
         )
@@ -384,6 +384,9 @@ def run_optimizer(
                     awi_rows=awi_rows,
                     bend_point_row=bend_point_row,
                     fra_rules=fra_rules,
+                    assumed_future_income=base_inputs.spouse_income,
+                    current_age=base_inputs.current_year - spouse_birth_year,
+                    retirement_age=base_inputs.spouse.retirement_age if base_inputs.spouse else 67,
                 )
             spouse_estimates[opt.label] = est
 

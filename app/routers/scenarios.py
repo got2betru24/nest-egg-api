@@ -165,14 +165,15 @@ async def duplicate_scenario(scenario_id: int):
     person_id_map: dict[int, int] = {}
     for p in persons:
         new_person_id = await execute(
-            """INSERT INTO persons (scenario_id, role, birth_year, birth_month, planned_retirement_age)
-               VALUES (%s,%s,%s,%s,%s)""",
+            """INSERT INTO persons (scenario_id, role, birth_year, birth_month, planned_retirement_age, current_income)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
             (
                 new_id,
                 p["role"],
                 p["birth_year"],
                 p["birth_month"],
                 p["planned_retirement_age"],
+                p["current_income"],
             ),
         )
         person_id_map[p["id"]] = new_person_id

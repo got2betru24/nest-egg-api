@@ -85,6 +85,11 @@ class PersonBase(BaseModel):
     birth_year: int = Field(..., ge=1940, le=2005)
     birth_month: int = Field(1, ge=1, le=12)
     planned_retirement_age: int = Field(55, ge=50, le=70)
+    current_income: float = Field(
+        0.0,
+        ge=0.0,
+        description="This person's individual earned income. Used to project future SS earnings.",
+    )
 
 
 class PersonCreate(PersonBase):
@@ -107,7 +112,15 @@ class AssumptionsBase(BaseModel):
     inflation_rate: float = Field(0.03, ge=0.0, le=0.20)
     plan_to_age: int = Field(90, ge=70, le=105)
     filing_status: FilingStatus = FilingStatus.MFJ
-    current_income: float = Field(0.0, ge=0.0)
+    current_income: float = Field(
+        0.0,
+        ge=0.0,
+        description=(
+            "Combined household income. Kept for backward compatibility and any "
+            "future household-level calculations. SS projections now use the "
+            "per-person current_income field on the persons table instead."
+        ),
+    )
     desired_retirement_income: float = Field(
         0.0, ge=0.0, description="In today's dollars"
     )

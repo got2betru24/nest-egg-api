@@ -62,14 +62,15 @@ async def create_person(scenario_id: int, body: PersonCreate):
         )
 
     person_id = await execute(
-        """INSERT INTO persons (scenario_id, role, birth_year, birth_month, planned_retirement_age)
-           VALUES (%s, %s, %s, %s, %s)""",
+        """INSERT INTO persons (scenario_id, role, birth_year, birth_month, planned_retirement_age, current_income)
+           VALUES (%s, %s, %s, %s, %s, %s)""",
         (
             scenario_id,
             body.role,
             body.birth_year,
             body.birth_month or 1,
             body.planned_retirement_age,
+            body.current_income,
         ),
     )
     row = await fetchone("SELECT * FROM persons WHERE id = %s", (person_id,))
@@ -85,12 +86,14 @@ async def update_person(person_id: int, body: PersonCreate):
 
     await execute(
         """UPDATE persons
-           SET birth_year = %s, birth_month = %s, planned_retirement_age = %s
+           SET birth_year = %s, birth_month = %s, planned_retirement_age = %s,
+               current_income = %s
            WHERE id = %s""",
         (
             body.birth_year,
             body.birth_month or 1,
             body.planned_retirement_age,
+            body.current_income,
             person_id,
         ),
     )

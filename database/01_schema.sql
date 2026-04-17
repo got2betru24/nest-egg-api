@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS persons (
     birth_year      SMALLINT UNSIGNED NOT NULL,
     birth_month     TINYINT UNSIGNED NOT NULL DEFAULT 1,
     planned_retirement_age  TINYINT UNSIGNED NOT NULL DEFAULT 55,
+    current_income  DECIMAL(12,2) UNSIGNED NOT NULL DEFAULT 0.00,
     CONSTRAINT fk_persons_scenario FOREIGN KEY (scenario_id)
         REFERENCES scenarios(id) ON DELETE CASCADE,
     UNIQUE KEY uq_person_role (scenario_id, role)
