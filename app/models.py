@@ -82,7 +82,7 @@ class ScenarioOut(ScenarioBase):
 
 class PersonBase(BaseModel):
     role: str = Field(..., pattern="^(primary|spouse)$")
-    birth_year: int = Field(..., ge=1940, le=2005)
+    birth_year: int = Field(..., ge=1940, le=2007)
     birth_month: int = Field(1, ge=1, le=12)
     planned_retirement_age: int = Field(55, ge=50, le=70)
     current_income: float = Field(
